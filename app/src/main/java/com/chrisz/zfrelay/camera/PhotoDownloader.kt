@@ -9,7 +9,10 @@ import com.chrisz.zfrelay.ptp.PtpIpClient
 import java.io.File
 import java.io.IOException
 import java.io.RandomAccessFile
+import java.util.concurrent.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 internal class PhotoDownloader(
@@ -27,18 +30,26 @@ internal class PhotoDownloader(
         val resumeOffset = part.length()
         onProgress(resumeOffset)
 
-        RandomAccessFile(part, "rw").use { output ->
-            client.copyObject(photo, resumeOffset) { offset, data ->
-                output.seek(offset)
-                output.write(data)
-                output.fd.sync()
-                onProgress(offset + data.size)
+        try {
+            RandomAccessFile(part, "rw").use { output ->
+                client.copyObject(photo, resumeOffset) { offset, data ->
+                    output.seek(offset)
+                    output.write(data)
+                    output.fd.sync()
+                    onProgress(offset + data.size)
+                }
             }
+            if (part.length() != photo.size) {
+                throw IOException("文件长度不完整，已保留 ${part.length()} 字节断点")
+            }
+            currentCoroutineContext().ensureActive()
+            client.ensureConnected()
+            publishJpeg(part, photo.filename)
+        } catch (error: Throwable) {
+            // A failed or cancelled connection can never resume this fragment again.
+            if (error is CancellationException || !client.isConnected) part.delete()
+            throw error
         }
-        if (part.length() != photo.size) {
-            throw IOException("文件长度不完整，已保留 ${part.length()} 字节断点")
-        }
-        publishJpeg(part, photo.filename)
     }
 
     private fun publishJpeg(part: File, filename: String): Uri {
@@ -55,12 +66,13 @@ internal class PhotoDownloader(
             resolver.openOutputStream(uri, "w")?.use { output ->
                 part.inputStream().use { input -> input.copyTo(output, 256 * 1024) }
             } ?: throw IOException("无法写入系统相册")
-            resolver.update(
+            val published = resolver.update(
                 uri,
                 ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) },
                 null,
                 null,
             )
+            if (published == 0) throw IOException("无法发布到系统相册")
             part.delete()
             return uri
         } catch (error: Throwable) {
@@ -68,6 +80,27 @@ internal class PhotoDownloader(
             throw error
         }
     }
+
+    companion object {
+        fun cleanupStalePartials(context: Context) {
+            cleanupPartialFiles(File(context.cacheDir, "downloads"))
+        }
+
+        fun cleanupPartials(context: Context, connectionId: String) {
+            cleanupPartialFiles(File(context.cacheDir, "downloads"), connectionId)
+        }
+    }
+}
+
+internal fun cleanupPartialFiles(directory: File, connectionId: String? = null) {
+    val prefix = connectionId?.let { "$it-" }
+    directory.listFiles()
+        ?.filter {
+            it.isFile &&
+                it.name.endsWith(".part") &&
+                (prefix == null || it.name.startsWith(prefix))
+        }
+        ?.forEach { it.delete() }
 }
 
 internal fun partialFile(directory: File, connectionId: String, photo: PhotoObject): File {

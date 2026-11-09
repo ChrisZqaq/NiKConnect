@@ -2,8 +2,11 @@ package com.chrisz.zfrelay.camera
 
 import com.chrisz.zfrelay.ptp.PhotoObject
 import java.io.File
+import java.nio.file.Files
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PhotoDownloaderTest {
@@ -18,5 +21,42 @@ class PhotoDownloaderTest {
 
         assertEquals(firstAttempt, sameConnectionRetry)
         assertNotEquals(firstAttempt, afterReconnect)
+    }
+
+    @Test
+    fun `session cleanup removes only files owned by the old connection`() {
+        val directory = Files.createTempDirectory("zf-relay-session-cleanup").toFile()
+        try {
+            val old = File(directory, "connection-A-1-10-DSC_0001.JPG.part").apply { writeBytes(ByteArray(4)) }
+            val current = File(directory, "connection-B-2-10-DSC_0002.JPG.part").apply { writeBytes(ByteArray(4)) }
+
+            cleanupPartialFiles(directory, "connection-A")
+
+            assertFalse(old.exists())
+            assertTrue(current.exists())
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `stale partial cleanup preserves published and unrelated files`() {
+        val directory = Files.createTempDirectory("zf-relay-cleanup").toFile()
+        try {
+            val first = File(directory, "connection-A-1-10-DSC_0001.JPG.part").apply { writeBytes(ByteArray(4)) }
+            val second = File(directory, "connection-B-2-10-DSC_0002.JPG.part").apply { writeBytes(ByteArray(4)) }
+            val published = File(directory, "DSC_0001.JPG").apply { writeBytes(ByteArray(4)) }
+            val nested = File(directory, "nested.part").apply { mkdir() }
+            val nestedPartial = File(nested, "keep.part").apply { writeBytes(ByteArray(4)) }
+
+            cleanupPartialFiles(directory)
+
+            assertFalse(first.exists())
+            assertFalse(second.exists())
+            assertTrue(published.exists())
+            assertTrue(nestedPartial.exists())
+        } finally {
+            directory.deleteRecursively()
+        }
     }
 }

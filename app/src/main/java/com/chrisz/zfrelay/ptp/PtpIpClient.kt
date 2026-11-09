@@ -16,9 +16,18 @@ internal class PtpIpClient(
     private val settleDelayMs: Long = 350,
     private val socketTimeoutMs: Int = 30_000,
 ) : Closeable {
+    @Volatile
     private var commandSocket: Socket? = null
+
+    @Volatile
     private var eventSocket: Socket? = null
+    private val resourceLock = Any()
+    private var lifecycle = 0L
     private var transactionId = 0L
+
+    @Volatile
+    internal var isConnected: Boolean = false
+        private set
 
     internal var connectionId: String = ""
         private set
@@ -35,11 +44,11 @@ internal class PtpIpClient(
     @Synchronized
     fun connect(): DeviceInfo {
         close()
+        val ticket = synchronized(resourceLock) { lifecycle }
         connectionId = java.util.UUID.randomUUID().toString()
         var stage = "连接命令通道"
         try {
-            val command = openSocket()
-            commandSocket = command
+            val command = openSocket(ticket, eventChannel = false)
             // Some Nikon Z bodies discard data sent immediately after the TCP handshake.
             if (settleDelayMs > 0) Thread.sleep(settleDelayMs)
             stage = "初始化命令通道"
@@ -53,8 +62,7 @@ internal class PtpIpClient(
             val ack = decodeInitCommandAck(initResponse.payload)
 
             stage = "连接事件通道"
-            val event = openSocket()
-            eventSocket = event
+            val event = openSocket(ticket, eventChannel = true)
             if (settleDelayMs > 0) Thread.sleep(settleDelayMs)
             stage = "初始化事件通道"
             event.getOutputStream().write(encodeInitEventRequest(ack.connectionNumber))
@@ -74,6 +82,10 @@ internal class PtpIpClient(
             deviceInfo = fetchDeviceInfo()
             if (!deviceInfo.supportsPartialObject) {
                 throw PtpException("当前相机不受支持")
+            }
+            synchronized(resourceLock) {
+                ensureOpen(ticket)
+                isConnected = true
             }
             return deviceInfo
         } catch (error: Exception) {
@@ -178,19 +190,45 @@ internal class PtpIpClient(
 
     private fun responseName(code: Int): String = "PTP 0x${code.toString(16).uppercase()}"
 
-    private fun openSocket(): Socket = socketFactory().apply {
-        receiveBufferSize = CHUNK_SIZE
-        tcpNoDelay = true
-        keepAlive = true
-        soTimeout = socketTimeoutMs
-        connect(InetSocketAddress(this@PtpIpClient.host, this@PtpIpClient.port), 10_000)
+    private fun openSocket(ticket: Long, eventChannel: Boolean): Socket {
+        val socket = socketFactory()
+        synchronized(resourceLock) {
+            ensureOpen(ticket)
+            if (eventChannel) eventSocket = socket else commandSocket = socket
+        }
+        try {
+            socket.receiveBufferSize = CHUNK_SIZE
+            socket.tcpNoDelay = true
+            socket.keepAlive = true
+            socket.soTimeout = socketTimeoutMs
+            socket.connect(InetSocketAddress(host, port), 10_000)
+            synchronized(resourceLock) { ensureOpen(ticket) }
+            return socket
+        } catch (error: Throwable) {
+            runCatching { socket.close() }
+            throw error
+        }
+    }
+
+    private fun ensureOpen(ticket: Long) {
+        if (lifecycle != ticket) throw IOException("连接已取消")
+    }
+
+    internal fun ensureConnected() {
+        if (!isConnected) throw IOException("相机已断开，请重新连接")
     }
 
     override fun close() {
-        runCatching { commandSocket?.close() }
-        runCatching { eventSocket?.close() }
-        commandSocket = null
-        eventSocket = null
+        val sockets = synchronized(resourceLock) {
+            lifecycle += 1
+            isConnected = false
+            (commandSocket to eventSocket).also {
+                commandSocket = null
+                eventSocket = null
+            }
+        }
+        runCatching { sockets.first?.close() }
+        runCatching { sockets.second?.close() }
     }
 
     private data class TransactionResult(val response: OperationResponse, val data: ByteArray)

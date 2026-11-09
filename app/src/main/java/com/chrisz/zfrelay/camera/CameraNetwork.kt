@@ -36,7 +36,24 @@ internal class CameraNetworkProvider(context: Context) {
     private val connectivityManager =
         context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
-    fun acquire(): CameraNetworkHandle {
+    fun newAcquisition(): CameraNetworkAcquisition = CameraNetworkAcquisition(connectivityManager)
+}
+
+internal class CameraNetworkAcquisition(
+    private val connectivityManager: ConnectivityManager,
+) : Closeable {
+    private val latch = CountDownLatch(1)
+    private val callbackLock = Any()
+
+    @Volatile
+    private var cancelled = false
+
+    @Volatile
+    private var cameraNetwork: Network? = null
+    private var callback: ConnectivityManager.NetworkCallback? = null
+
+    fun await(): CameraNetworkHandle {
+        ensureActive()
         connectivityManager.activeNetwork?.let { active ->
             val capabilities = connectivityManager.getNetworkCapabilities(active)
             if (capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true) {
@@ -44,11 +61,9 @@ internal class CameraNetworkProvider(context: Context) {
             }
         }
 
-        val latch = CountDownLatch(1)
-        var cameraNetwork: Network? = null
-        val callback = object : ConnectivityManager.NetworkCallback() {
+        val networkCallback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
-                if (cameraNetwork == null) {
+                if (!cancelled && cameraNetwork == null) {
                     cameraNetwork = network
                     latch.countDown()
                 }
@@ -58,17 +73,39 @@ internal class CameraNetworkProvider(context: Context) {
             .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
             .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             .build()
-        return try {
-            connectivityManager.requestNetwork(request, callback)
-            if (!latch.await(12, TimeUnit.SECONDS)) {
-                throw IOException("未找到相机 Wi-Fi，请先连接")
+        try {
+            synchronized(callbackLock) {
+                ensureActive()
+                callback = networkCallback
+                connectivityManager.requestNetwork(request, networkCallback)
             }
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(12)
+            while (!latch.await(250, TimeUnit.MILLISECONDS)) {
+                ensureActive()
+                if (System.nanoTime() >= deadline) throw IOException("未找到相机 Wi-Fi，请先连接")
+            }
+            ensureActive()
             val network = cameraNetwork ?: throw IOException("相机 Wi-Fi 不可用")
-            CameraNetworkHandle(gateway(network), network, connectivityManager, callback)
+            return CameraNetworkHandle(gateway(network), network, connectivityManager, networkCallback)
         } catch (error: Throwable) {
-            runCatching { connectivityManager.unregisterNetworkCallback(callback) }
+            close()
             throw error
         }
+    }
+
+    override fun close() {
+        cancelled = true
+        latch.countDown()
+        val registered = synchronized(callbackLock) {
+            callback.also { callback = null }
+        }
+        if (registered != null) {
+            runCatching { connectivityManager.unregisterNetworkCallback(registered) }
+        }
+    }
+
+    private fun ensureActive() {
+        if (cancelled) throw IOException("连接已取消")
     }
 
     private fun gateway(network: Network): String? =

@@ -50,6 +50,78 @@ class PtpIpClientFaultTest {
     }
 
     @Test
+    fun `close interrupts TCP connection before the socket is connected`() {
+        val socket = object : Socket() {
+            val connecting = java.util.concurrent.CountDownLatch(1)
+            val closed = java.util.concurrent.CountDownLatch(1)
+
+            override fun connect(endpoint: java.net.SocketAddress, timeout: Int) {
+                connecting.countDown()
+                closed.await(5, java.util.concurrent.TimeUnit.SECONDS)
+                throw java.net.SocketException("Socket closed")
+            }
+
+            override fun close() {
+                super.close()
+                closed.countDown()
+            }
+        }
+        val client = PtpIpClient(
+            host = "192.0.2.1",
+            socketFactory = { socket },
+            settleDelayMs = 0,
+            socketTimeoutMs = 30_000,
+        )
+        val failure = AtomicReference<Throwable?>()
+        val connecting = thread(isDaemon = true) {
+            runCatching { client.connect() }.onFailure(failure::set)
+        }
+        assertTrue(socket.connecting.await(2, java.util.concurrent.TimeUnit.SECONDS))
+
+        client.close()
+
+        assertTrue("建连中的 Socket 未被关闭", socket.closed.await(1, java.util.concurrent.TimeUnit.SECONDS))
+        connecting.join(2_000)
+        assertFalse("TCP 建连线程仍未退出", connecting.isAlive)
+        assertTrue(failure.get() is IOException)
+        assertFalse(client.isConnected)
+    }
+
+    @Test
+    fun `close interrupts a pending handshake without waiting for socket timeout`() {
+        ServerSocket(0, 50, InetAddress.getByName("127.0.0.1")).use { server ->
+            server.soTimeout = 5_000
+            val accepted = java.util.concurrent.CountDownLatch(1)
+            val worker = thread(isDaemon = true) {
+                server.accept().use { socket ->
+                    accepted.countDown()
+                    readPacket(socket.getInputStream())
+                    socket.getInputStream().read()
+                }
+            }
+            val client = PtpIpClient(
+                host = "127.0.0.1",
+                port = server.localPort,
+                settleDelayMs = 0,
+                socketTimeoutMs = 30_000,
+            )
+            val failure = AtomicReference<Throwable?>()
+            val connecting = thread(isDaemon = true) {
+                runCatching { client.connect() }.onFailure(failure::set)
+            }
+            assertTrue(accepted.await(2, java.util.concurrent.TimeUnit.SECONDS))
+            client.close()
+            connecting.join(2_000)
+            worker.join(2_000)
+
+            assertFalse("握手线程仍在等待 Socket 超时", connecting.isAlive)
+            assertFalse(worker.isAlive)
+            assertTrue(failure.get() is IOException)
+            assertFalse(client.isConnected)
+        }
+    }
+
+    @Test
     fun `command initialization failure reports its connection stage`() {
         ServerSocket(0, 50, InetAddress.getByName("127.0.0.1")).use { server ->
             server.soTimeout = 5_000
