@@ -1,42 +1,28 @@
-# ZF Relay
+# NiKConnect
 
-一个面向尼康相机的极简 Android 传图应用。通过相机 Wi-Fi 与 PTP/IP 协议连接相机，浏览并下载照片，不依赖云端服务。
+Android 优先的 Nikon 相机本地连接、浏览与原文件导出工具。Kotlin + Jetpack Compose + PTP/IP 直连，无账号、无云端、无服务端。
 
-> 当前为早期验证版本，仅在一加 Ace 5 Pro 与 Nikon Zf 的组合上完成过手动真机验证，不代表已适配其他设备。
+当前真机基线：一加 Ace 5 Pro + Nikon Zf（PTP/IP 连接、照片列表、缩略图、JPEG 原图下载已验收）。
 
-## 当前功能
+## 文档
 
-- 通过相机热点建立 PTP/IP 连接
-- 读取照片列表并显示缩略图
-- 下载 JPEG 原图到手机相册
-- 显示下载进度与基础错误信息
-- 同一连接内下载中断后安全重试
+- 产品与验收门：[docs/PRD.md](docs/PRD.md)
+- 技术证据分级：[docs/references/TECHNICAL_REFERENCES.md](docs/references/TECHNICAL_REFERENCES.md)
+- 工程规范：[CLAUDE.md](CLAUDE.md)（`AGENTS.md` 为其符号链接）
+- 进展与问题记录：[PROGRESS.md](PROGRESS.md)
+- 验收记录：[docs/acceptance/](docs/acceptance/)
+- 交互原型（仅视觉参考）：[docs/prototype/](docs/prototype/README.md)
 
-## 安装
+## 本地检查
 
-从 [GitHub Releases](https://github.com/ChrisZqaq/ZConnect/releases) 下载 APK。当前附件使用调试签名，安装前请确认来源；它不是应用商店正式发布版。
-
-系统要求：Android 10 或更高版本。
-
-## 使用
-
-1. 在 Zf 的「网络菜单 → 连接至智能设备 → Wi-Fi 连接」中开启相机 Wi-Fi。
-2. 手机连接该热点。
-3. 打开 ZF Relay，点击「连接」。
-4. 浏览照片并选择下载。
-
-## 构建
-
-需要 JDK 17 与 Android SDK。项目使用 Gradle Wrapper，无需单独安装 Gradle。
+需要 JDK 17 与 Android SDK（路径在未跟踪的 `local.properties`）。
 
 ```bash
-./gradlew testDebugUnitTest lintDebug assembleDebug
+./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 ```
 
-## 开发状态与限制
+构建产物 `app/build/outputs/apk/debug/` 仅用于个人真机测试。
 
-当前进展与已知限制见 [PROGRESS.md](PROGRESS.md)。MVP 审查、开发顺序和验收标准见 [后续开发计划](docs/NEXT_STEPS.md)。
+## 许可
 
-## 许可与参考
-
-项目采用 [MIT License](LICENSE)。协议实现参考及第三方声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+见 [LICENSE](LICENSE) 与 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
