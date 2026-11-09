@@ -10,7 +10,7 @@
         android:icon="@drawable/ic_camera"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.ZfRelay">
+        android:theme="@style/Theme.NiKConnect">
         <activity
             android:name=".MainActivity"
             android:exported="true">

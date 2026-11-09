@@ -1,4 +1,4 @@
-package com.chrisz.zfrelay.ptp
+package com.chrisz.nikconnect.ptp
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

@@ -1,4 +1,4 @@
-package com.chrisz.zfrelay.ptp
+package com.chrisz.nikconnect.ptp
 
 import java.io.ByteArrayInputStream
 import org.junit.Assert.assertArrayEquals
@@ -10,13 +10,13 @@ class PtpPacketsTest {
     @Test
     fun `init command has framing guid name and protocol version`() {
         val guid = ByteArray(16) { it.toByte() }
-        val packet = encodeInitCommandRequest(guid, "ZF Relay")
+        val packet = encodeInitCommandRequest(guid, "NiKConnect")
         assertEquals(packet.size.toLong(), LittleEndianReader(packet).u32())
         assertEquals(PacketType.INIT_COMMAND_REQUEST, LittleEndianReader(packet.copyOfRange(4, 8)).u32().toInt())
 
         val reader = LittleEndianReader(packet.copyOfRange(8, packet.size))
         assertArrayEquals(guid, reader.bytes(16))
-        assertArrayEquals("ZF Relay".toCharArray(), CharArray(8) { reader.u16().toChar() })
+        assertArrayEquals("NiKConnect".toCharArray(), CharArray(10) { reader.u16().toChar() })
         assertEquals(0, reader.u16())
         assertEquals(0x00010000L, reader.u32())
     }

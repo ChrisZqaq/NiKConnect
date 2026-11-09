@@ -1,4 +1,4 @@
-package com.chrisz.zfrelay.camera
+package com.chrisz.nikconnect.camera
 
 import android.content.Context
 import android.net.ConnectivityManager

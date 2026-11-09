@@ -1,4 +1,4 @@
-package com.chrisz.zfrelay.ptp
+package com.chrisz.nikconnect.ptp
 
 internal data class DeviceInfo(
     val manufacturer: String,

@@ -1,14 +1,14 @@
-package com.chrisz.zfrelay.ui
+package com.chrisz.nikconnect.ui
 
 import android.app.Application
 import android.util.LruCache
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.chrisz.zfrelay.camera.CameraRepository
-import com.chrisz.zfrelay.camera.PhotoDownloader
-import com.chrisz.zfrelay.ptp.DeviceInfo
-import com.chrisz.zfrelay.ptp.PhotoObject
-import com.chrisz.zfrelay.ptp.PtpException
+import com.chrisz.nikconnect.camera.CameraRepository
+import com.chrisz.nikconnect.camera.PhotoDownloader
+import com.chrisz.nikconnect.ptp.DeviceInfo
+import com.chrisz.nikconnect.ptp.PhotoObject
+import com.chrisz.nikconnect.ptp.PtpException
 import java.io.IOException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException

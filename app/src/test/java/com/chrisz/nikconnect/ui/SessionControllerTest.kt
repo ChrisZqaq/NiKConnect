@@ -1,4 +1,4 @@
-package com.chrisz.zfrelay.ui
+package com.chrisz.nikconnect.ui
 
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.joinAll

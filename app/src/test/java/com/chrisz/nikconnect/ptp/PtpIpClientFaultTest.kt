@@ -1,4 +1,4 @@
-package com.chrisz.zfrelay.ptp
+package com.chrisz.nikconnect.ptp
 
 import java.io.IOException
 import java.net.InetAddress

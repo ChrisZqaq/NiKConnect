@@ -1,11 +1,11 @@
-package com.chrisz.zfrelay.camera
+package com.chrisz.nikconnect.camera
 
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
-import com.chrisz.zfrelay.ptp.PhotoObject
-import com.chrisz.zfrelay.ptp.PtpIpClient
+import com.chrisz.nikconnect.ptp.PhotoObject
+import com.chrisz.nikconnect.ptp.PtpIpClient
 import java.io.File
 import java.io.IOException
 import java.io.RandomAccessFile
@@ -57,7 +57,7 @@ internal class PhotoDownloader(
         val values = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, filename)
             put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/ZF Relay")
+            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/NiKConnect")
             put(MediaStore.Images.Media.IS_PENDING, 1)
         }
         val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)

@@ -1,4 +1,4 @@
-package com.chrisz.zfrelay
+package com.chrisz.nikconnect
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -8,19 +8,19 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.chrisz.zfrelay.ui.MainViewModel
-import com.chrisz.zfrelay.ui.ZfRelayApp
-import com.chrisz.zfrelay.ui.ZfRelayTheme
+import com.chrisz.nikconnect.ui.MainViewModel
+import com.chrisz.nikconnect.ui.NiKConnectApp
+import com.chrisz.nikconnect.ui.NiKConnectTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            ZfRelayTheme {
+            NiKConnectTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     val model: MainViewModel = viewModel()
-                    ZfRelayApp(model)
+                    NiKConnectApp(model)
                 }
             }
         }

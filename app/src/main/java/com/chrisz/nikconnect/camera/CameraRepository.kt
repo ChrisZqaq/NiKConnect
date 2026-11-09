@@ -1,9 +1,9 @@
-package com.chrisz.zfrelay.camera
+package com.chrisz.nikconnect.camera
 
 import android.content.Context
-import com.chrisz.zfrelay.ptp.DeviceInfo
-import com.chrisz.zfrelay.ptp.PhotoObject
-import com.chrisz.zfrelay.ptp.PtpIpClient
+import com.chrisz.nikconnect.ptp.DeviceInfo
+import com.chrisz.nikconnect.ptp.PhotoObject
+import com.chrisz.nikconnect.ptp.PtpIpClient
 import java.io.Closeable
 import java.io.IOException
 

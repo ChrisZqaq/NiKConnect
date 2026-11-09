@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "ZF Relay"
+rootProject.name = "NiKConnect"
 include(":app")

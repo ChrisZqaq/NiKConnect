@@ -1,6 +1,6 @@
-package com.chrisz.zfrelay.camera
+package com.chrisz.nikconnect.camera
 
-import com.chrisz.zfrelay.ptp.PhotoObject
+import com.chrisz.nikconnect.ptp.PhotoObject
 import java.io.File
 import java.nio.file.Files
 import org.junit.Assert.assertEquals

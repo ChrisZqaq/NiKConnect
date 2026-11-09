@@ -1,4 +1,4 @@
-package com.chrisz.zfrelay.ui
+package com.chrisz.nikconnect.ui
 
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
@@ -62,13 +62,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.chrisz.zfrelay.ptp.DeviceInfo
-import com.chrisz.zfrelay.ptp.PhotoObject
+import com.chrisz.nikconnect.ptp.DeviceInfo
+import com.chrisz.nikconnect.ptp.PhotoObject
 
 @Composable
-internal fun ZfRelayApp(model: MainViewModel) {
+internal fun NiKConnectApp(model: MainViewModel) {
     val state by model.state.collectAsStateWithLifecycle()
-    ZfRelayContent(
+    NiKConnectContent(
         state = state,
         onConnect = model::connect,
         onRefresh = model::refreshPhotos,
@@ -81,7 +81,7 @@ internal fun ZfRelayApp(model: MainViewModel) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ZfRelayContent(
+private fun NiKConnectContent(
     state: UiState,
     onConnect: (String) -> Unit,
     onRefresh: () -> Unit,
@@ -372,8 +372,8 @@ private fun formatBytes(bytes: Long): String = when {
 @Composable
 private fun GalleryPreview() {
     val photo = PhotoObject(7, 1, 0x3801, 8_500_000, "DSC_0007.JPG", "20261027T143900", 20_000)
-    ZfRelayTheme {
-        ZfRelayContent(
+    NiKConnectTheme {
+        NiKConnectContent(
             state = UiState(
                 connectionStatus = ConnectionStatus.CONNECTED,
                 deviceInfo = DeviceInfo("Nikon", "Z f", "1.30", emptyList()),

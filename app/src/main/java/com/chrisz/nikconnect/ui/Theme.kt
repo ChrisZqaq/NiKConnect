@@ -1,4 +1,4 @@
-package com.chrisz.zfrelay.ui
+package com.chrisz.nikconnect.ui
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
@@ -20,6 +20,6 @@ private val Scheme = darkColorScheme(
 )
 
 @Composable
-internal fun ZfRelayTheme(content: @Composable () -> Unit) {
+internal fun NiKConnectTheme(content: @Composable () -> Unit) {
     MaterialTheme(colorScheme = Scheme, content = content)
 }

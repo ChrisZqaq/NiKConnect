@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "com.chrisz.zfrelay"
+    namespace = "com.chrisz.nikconnect"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.chrisz.zfrelay"
+        applicationId = "com.chrisz.nikconnect"
         minSdk = 29
         targetSdk = 35
         versionCode = 2
