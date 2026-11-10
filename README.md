@@ -2,7 +2,7 @@
 
 Android 优先的 Nikon 相机本地连接、浏览与原文件导出工具。Kotlin + Jetpack Compose + PTP/IP 直连，无账号、无云端、无服务端。
 
-当前真机基线：一加 Ace 5 Pro + Nikon Zf（PTP/IP 连接、照片列表、缩略图、JPEG 原图下载已验收）。
+当前真机基线：Nikon Zf（PTP/IP 连接、照片列表、缩略图、JPEG 原图下载已验收）。
 
 ## 文档
 
