@@ -17,6 +17,14 @@
 | 0.1.0 | PTP/IP 连接、最近照片、缩略图、单张 JPEG 下载 | ✅ 用户验收 | [docs/acceptance/0.1.0.md](docs/acceptance/0.1.0.md) |
 | 0.1.1 | R1–R4 修复：会话隔离、退出不阻塞、断线同步 UI、跨连接残片清理；19 项 JVM 测试 | ✅ 用户确认（2026-11-09） | [docs/acceptance/0.1.1.md](docs/acceptance/0.1.1.md) |
 
+## 2026-11-10 · 0.2 批次 1：串行下载队列（开发中）
+
+- 新增 `ui/DownloadQueue`：`QueueStatus{WAITING,RUNNING,COMPLETED,FAILED,CANCELLED}`、`QueueTask`、`tasks: StateFlow<List<QueueTask>>`。
+- 行为：FIFO 串行（PRD D-06，一次只向相机发一个任务）；失败不阻塞后续项；单任务 cancel（等待中直接标记，执行中只取消执行体、泵存活继续下一项）；cancelAll 绑定会话结束，未完成任务标 CANCELLED 后不再接受新任务；enqueue 去重（等待/执行/完成跳过，失败/取消重置重排）。
+- 结构：pump 协程仅做通道 for 循环 + join 当前任务；每任务以 `pumpScope.launch` 子协程执行（SupervisorJob 隔离），cancel(RUNNING) 只取消子协程——避免早期版本 pump.cancel() 连带杀掉整个队列的问题。
+- 测试：`DownloadQueueTest` 10 项 JVM 测试全绿（FIFO 顺序、失败不阻塞、进度字节、取消执行中任务继续队列、取消等待任务跳过、去重、失败重试、cancelAll 停队列、onError 回调、终态保留）。全套 29 项测试通过，lintDebug + assembleDebug 通过。
+- 待办：接入 MainViewModel/TransferScreen（批次 2）。
+
 ## 2026-11-10 · 仓库规整（无功能改动）
 
 - 0.1.1 未提交工作树提交为基线 `e07e137`。
