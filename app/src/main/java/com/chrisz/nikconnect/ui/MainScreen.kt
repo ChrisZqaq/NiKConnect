@@ -73,6 +73,8 @@ internal fun NiKConnectApp(model: MainViewModel) {
         onConnect = model::connect,
         onRefresh = model::refreshPhotos,
         onDownload = model::download,
+        onRetryDownload = model::retryDownload,
+        onCancelDownload = model::cancelDownload,
         onDisconnect = model::disconnect,
         onTab = model::selectTab,
         thumbnailLoader = model::thumbnail,
@@ -86,6 +88,8 @@ private fun NiKConnectContent(
     onConnect: (String) -> Unit,
     onRefresh: () -> Unit,
     onDownload: (PhotoObject) -> Unit,
+    onRetryDownload: (Long) -> Unit,
+    onCancelDownload: (Long) -> Unit,
     onDisconnect: () -> Unit,
     onTab: (Int) -> Unit,
     thumbnailLoader: suspend (Long) -> ByteArray,
@@ -133,7 +137,7 @@ private fun NiKConnectContent(
             } else if (state.selectedTab == 0) {
                 GalleryScreen(state, onDownload, thumbnailLoader)
             } else {
-                TransferScreen(state, onDownload)
+                TransferScreen(state, onRetryDownload, onCancelDownload)
             }
         }
     }
@@ -239,7 +243,7 @@ private fun GalleryScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 items(state.photos, key = { it.handle }) { photo ->
-                    PhotoCard(photo, state.downloading, onDownload, thumbnailLoader)
+                    PhotoCard(photo, onDownload, thumbnailLoader)
                 }
             }
         }
@@ -249,7 +253,6 @@ private fun GalleryScreen(
 @Composable
 private fun PhotoCard(
     photo: PhotoObject,
-    downloading: Boolean,
     onDownload: (PhotoObject) -> Unit,
     thumbnailLoader: suspend (Long) -> ByteArray,
 ) {
@@ -285,19 +288,24 @@ private fun PhotoCard(
                 )
                 Button(
                     onClick = { onDownload(photo) },
-                    enabled = photo.isJpeg && !downloading,
+                    enabled = photo.isJpeg,
                     modifier = Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(horizontal = 8.dp),
                 ) {
                     Text(if (photo.isJpeg) "下载" else "暂不支持")
                 }
+
             }
         }
     }
 }
 
 @Composable
-private fun TransferScreen(state: UiState, onDownload: (PhotoObject) -> Unit) {
+private fun TransferScreen(
+    state: UiState,
+    onRetry: (Long) -> Unit,
+    onCancel: (Long) -> Unit,
+) {
     if (state.downloads.isEmpty()) {
         Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
             Text("暂无传输", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -315,31 +323,62 @@ private fun TransferScreen(state: UiState, onDownload: (PhotoObject) -> Unit) {
                         Text(item.photo.filename, fontWeight = FontWeight.SemiBold)
                         Text(
                             when (item.status) {
+                                DownloadStatus.WAITING -> "排队中"
                                 DownloadStatus.DOWNLOADING -> "下载中"
                                 DownloadStatus.COMPLETED -> "已完成"
                                 DownloadStatus.FAILED -> "失败"
+                                DownloadStatus.CANCELLED -> "已取消"
                             },
-                            color = if (item.status == DownloadStatus.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                            color = if (item.status == DownloadStatus.FAILED) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.primary
+                            },
                         )
                     }
-                    LinearProgressIndicator(
-                        progress = { if (item.photo.size == 0L) 0f else item.transferred.toFloat() / item.photo.size },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text(
-                        "${formatBytes(item.transferred)} / ${formatBytes(item.photo.size)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    when (item.status) {
-                        DownloadStatus.COMPLETED -> Text("已保存到相册", color = MaterialTheme.colorScheme.primary)
-                        DownloadStatus.FAILED -> {
-                            Text(item.error ?: "传输中断", color = MaterialTheme.colorScheme.error)
-                            Button(onClick = { onDownload(item.photo) }, enabled = !state.downloading) {
+                    if (item.status == DownloadStatus.DOWNLOADING || item.status == DownloadStatus.COMPLETED) {
+                        LinearProgressIndicator(
+                            progress = {
+                                if (item.photo.size == 0L) 0f else item.transferred.toFloat() / item.photo.size
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(
+                            "${formatBytes(item.transferred)} / ${formatBytes(item.photo.size)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        when (item.status) {
+                            DownloadStatus.COMPLETED -> Text(
+                                "已保存到相册",
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            DownloadStatus.FAILED -> {
+                                Text(
+                                    item.error ?: "传输中断",
+                                    modifier = Modifier.weight(1f),
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                                Button(onClick = { onRetry(item.photo.handle) }) {
+                                    Text("重试")
+                                }
+                            }
+                            DownloadStatus.WAITING, DownloadStatus.DOWNLOADING -> TextButton(
+                                onClick = { onCancel(item.photo.handle) },
+                            ) {
+                                Text("取消")
+                            }
+                            DownloadStatus.CANCELLED -> Button(onClick = { onRetry(item.photo.handle) }) {
                                 Text("重试")
                             }
                         }
-                        DownloadStatus.DOWNLOADING -> Unit
                     }
                 }
             }
@@ -383,6 +422,8 @@ private fun GalleryPreview() {
             onConnect = {},
             onRefresh = {},
             onDownload = {},
+            onRetryDownload = {},
+            onCancelDownload = {},
             onDisconnect = {},
             onTab = {},
             thumbnailLoader = { ByteArray(0) },
