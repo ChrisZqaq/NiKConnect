@@ -148,6 +148,12 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         downloadQueue.enqueue(listOf(photo))
     }
 
+    /** 批量下载（多选模式）；仅 JPEG 入队，RAW 由队列逐项跳过。 */
+    fun downloadAll(photos: List<PhotoObject>) {
+        if (_state.value.connectionStatus != ConnectionStatus.CONNECTED) return
+        downloadQueue.enqueue(photos.filter { it.isJpeg })
+    }
+
     /** 重试失败/取消的任务；队列的去重逻辑会重置后重新排队。 */
     fun retryDownload(handle: Long) {
         val task = downloadQueue.tasks.value.firstOrNull { it.photo.handle == handle } ?: return

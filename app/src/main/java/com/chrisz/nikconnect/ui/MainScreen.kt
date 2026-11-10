@@ -23,8 +23,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Button
@@ -73,6 +75,7 @@ internal fun NiKConnectApp(model: MainViewModel) {
         onConnect = model::connect,
         onRefresh = model::refreshPhotos,
         onDownload = model::download,
+        onDownloadAll = model::downloadAll,
         onRetryDownload = model::retryDownload,
         onCancelDownload = model::cancelDownload,
         onDisconnect = model::disconnect,
@@ -88,6 +91,7 @@ private fun NiKConnectContent(
     onConnect: (String) -> Unit,
     onRefresh: () -> Unit,
     onDownload: (PhotoObject) -> Unit,
+    onDownloadAll: (List<PhotoObject>) -> Unit,
     onRetryDownload: (Long) -> Unit,
     onCancelDownload: (Long) -> Unit,
     onDisconnect: () -> Unit,
@@ -135,7 +139,7 @@ private fun NiKConnectContent(
             if (!connected) {
                 ConnectionScreen(state, onConnect)
             } else if (state.selectedTab == 0) {
-                GalleryScreen(state, onDownload, thumbnailLoader)
+                GalleryScreen(state, onDownload, onDownloadAll, thumbnailLoader)
             } else {
                 TransferScreen(state, onRetryDownload, onCancelDownload)
             }
@@ -215,15 +219,36 @@ private fun ConnectionStep(number: String, title: String, body: String) {
 private fun GalleryScreen(
     state: UiState,
     onDownload: (PhotoObject) -> Unit,
+    onDownloadAll: (List<PhotoObject>) -> Unit,
     thumbnailLoader: suspend (Long) -> ByteArray,
 ) {
+    var selectionMode by rememberSaveable { mutableStateOf(false) }
+    val selected = rememberSaveable(state.photos.map { it.handle }) {
+        mutableStateOf(setOf<Long>())
+    }
+    fun exitSelection() {
+        selectionMode = false
+        selected.value = emptySet()
+    }
     Column(Modifier.fillMaxSize()) {
-        Text(
-            "照片",
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-        )
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                if (selectionMode) "已选 ${selected.value.size} 项" else "照片",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+            )
+            if (state.photos.isNotEmpty()) {
+                TextButton(onClick = {
+                    if (selectionMode) exitSelection() else selectionMode = true
+                }) {
+                    Text(if (selectionMode) "取消" else "多选")
+                }
+            }
+        }
         if (state.error != null) ErrorCard(state.error, Modifier.padding(horizontal = 20.dp))
         when {
             state.loadingPhotos -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -236,14 +261,68 @@ private fun GalleryScreen(
             state.photos.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("暂无照片", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            else -> LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 168.dp),
-                contentPadding = PaddingValues(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                items(state.photos, key = { it.handle }) { photo ->
-                    PhotoCard(photo, onDownload, thumbnailLoader)
+            else -> Box(Modifier.fillMaxSize()) {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(minSize = 168.dp),
+                    contentPadding = PaddingValues(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    items(state.photos, key = { it.handle }) { photo ->
+                        val onToggle: ((Long) -> Unit)? = if (selectionMode) {
+                            { handle: Long ->
+                                selected.value = if (handle in selected.value) {
+                                    selected.value - handle
+                                } else {
+                                    selected.value + handle
+                                }
+                            }
+                        } else {
+                            null
+                        }
+                        PhotoCard(
+                            photo = photo,
+                            selectionMode = selectionMode,
+                            isSelected = photo.handle in selected.value,
+                            onToggleSelect = onToggle,
+                            onDownload = onDownload,
+                            thumbnailLoader = thumbnailLoader,
+                        )
+                    }
+                }
+                if (selectionMode) {
+                    Surface(
+                        modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+                        tonalElevation = 3.dp,
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            val allJpegSelected = state.photos.filter { it.isJpeg }.isNotEmpty() &&
+                                state.photos.filter { it.isJpeg }.all { it.handle in selected.value }
+                            TextButton(onClick = {
+                                selected.value = if (allJpegSelected) {
+                                    emptySet()
+                                } else {
+                                    state.photos.filter { it.isJpeg }.map { it.handle }.toSet()
+                                }
+                            }) {
+                                Text(if (allJpegSelected) "取消全选" else "全选")
+                            }
+                            Button(
+                                onClick = {
+                                    onDownloadAll(state.photos.filter { it.handle in selected.value })
+                                    exitSelection()
+                                },
+                                enabled = selected.value.isNotEmpty(),
+                            ) {
+                                Text("下载所选 (${selected.value.size})")
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -253,6 +332,9 @@ private fun GalleryScreen(
 @Composable
 private fun PhotoCard(
     photo: PhotoObject,
+    selectionMode: Boolean,
+    isSelected: Boolean,
+    onToggleSelect: ((Long) -> Unit)?,
     onDownload: (PhotoObject) -> Unit,
     thumbnailLoader: suspend (Long) -> ByteArray,
 ) {
@@ -262,7 +344,21 @@ private fun PhotoCard(
     val bitmap = remember(bytes) {
         bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
     }
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) {
+                MaterialTheme.colorScheme.secondaryContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceVariant
+            },
+        ),
+        onClick = {
+            when {
+                selectionMode && onToggleSelect != null -> onToggleSelect(photo.handle)
+                !selectionMode && photo.isJpeg -> onDownload(photo)
+            }
+        },
+    ) {
         Column {
             Box(
                 modifier = Modifier.fillMaxWidth().aspectRatio(1.35f).background(MaterialTheme.colorScheme.surface),
@@ -278,6 +374,18 @@ private fun PhotoCard(
                 } else {
                     Text(if (photo.isRaw) "NEF" else "JPEG", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                if (selectionMode) {
+                    Icon(
+                        imageVector = if (isSelected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                        contentDescription = if (isSelected) "已选中" else "未选中",
+                        modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
+                        tint = if (isSelected) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                        },
+                    )
+                }
             }
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text(photo.filename, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -286,15 +394,16 @@ private fun PhotoCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Button(
-                    onClick = { onDownload(photo) },
-                    enabled = photo.isJpeg,
-                    modifier = Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(horizontal = 8.dp),
-                ) {
-                    Text(if (photo.isJpeg) "下载" else "暂不支持")
+                if (!selectionMode) {
+                    Button(
+                        onClick = { onDownload(photo) },
+                        enabled = photo.isJpeg,
+                        modifier = Modifier.fillMaxWidth(),
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                    ) {
+                        Text(if (photo.isJpeg) "下载" else "暂不支持")
+                    }
                 }
-
             }
         }
     }
@@ -422,6 +531,7 @@ private fun GalleryPreview() {
             onConnect = {},
             onRefresh = {},
             onDownload = {},
+            onDownloadAll = {},
             onRetryDownload = {},
             onCancelDownload = {},
             onDisconnect = {},
