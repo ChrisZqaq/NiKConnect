@@ -46,6 +46,14 @@
 - disconnect/invalidateSession 时 downloader 置空并 cancelAll：等待/执行中任务标 CANCELLED，COMPLETED/FAILED 记录保留。
 - 29 项 JVM 测试全过；lintDebug + assembleDebug 通过。
 
+## 2026-11-10 · 0.2 批次 3：图库多选模式
+
+- GalleryScreen 新增多选模式：顶栏"多选"按钮进入（标题变"已选 N 项"），再点"取消"退出并清空选择。
+- PhotoCard 重构：Card 整卡可点（多选模式下点卡切换选中；普通模式点卡直接下载 JPEG），多选时右上角 CheckCircle/RadioButtonUnchecked 指示，选中卡用 secondaryContainer 高亮；多选模式隐藏单个下载按钮。
+- 底部固定下载栏（Surface tonalElevation）：全选/取消全选（仅统计 JPEG），"下载所选 (N)"按钮 → MainViewModel.downloadAll（过滤 RAW 后 enqueue，队列去重+串行执行）。
+- 下载完成后自动退出多选模式；selected 以 handle 集合保存（rememberSaveable + photos key）。
+- 29 项 JVM 测试全过；lintDebug + assembleDebug 通过。
+
 ## 开放问题
 
 1. 真实图库规模（120 / 300 / 更大）→ 决定 0.2 分页与批量元数据优先级。
