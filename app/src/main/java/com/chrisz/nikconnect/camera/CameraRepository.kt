@@ -83,8 +83,8 @@ internal class CameraRepository(context: Context) : Closeable {
         }
     }
 
-    fun listPhotos(): Pair<Int, List<PhotoObject>> =
-        requireClient().listPhotos()
+    fun listPhotos(alreadyLoaded: List<PhotoObject> = emptyList(), pageSize: Int = 60): Triple<Int, List<PhotoObject>, Boolean> =
+        requireClient().listPhotos(alreadyLoaded, pageSize)
 
     fun thumbnail(handle: Long): ByteArray = requireClient().getThumbnail(handle)
 

@@ -54,6 +54,14 @@
 - 下载完成后自动退出多选模式；selected 以 handle 集合保存（rememberSaveable + photos key）。
 - 29 项 JVM 测试全过；lintDebug + assembleDebug 通过。
 
+## 2026-11-10 · 0.2 批次 4：图库分页 + 顶栏改名
+
+- PtpIpClient.listPhotos 重构为分页：先 GetObjectHandles 全量句柄（一次事务，轻量），再按页大小 60 分批 GetObjectInfo（最新优先），返回 (总数, 已加载对象, hasMore)；每页耗时以 Log.i("PtpIpClient") 打点（真机验收时记录）。TAG 并入已有 companion object。
+- MainViewModel 新增 loadMorePhotos()：以当前 photos 为已加载前缀请求下一页并追加；UiState 新增 loadingMore/hasMore 字段；loadingMore 期间禁止重复触发。
+- 图库网格底部新增"加载更多（已加载/总数）"页脚（hasMore 时显示，loadingMore 显示转圈）；总数仍来自 GetObjectHandles。
+- 顶栏 "ZF RELAY" → "NIKCONNECT"（0.1 改名遗漏，MainScreen.kt:96）。
+- 29 项 JVM 测试全过；lintDebug + assembleDebug 通过。
+
 ## 开放问题
 
 1. 真实图库规模（120 / 300 / 更大）→ 决定 0.2 分页与批量元数据优先级。

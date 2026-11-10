@@ -39,6 +39,8 @@ internal data class UiState(
     val photos: List<PhotoObject> = emptyList(),
     val totalPhotoCount: Int = 0,
     val loadingPhotos: Boolean = false,
+    val loadingMore: Boolean = false,
+    val hasMore: Boolean = false,
     val error: String? = null,
     val selectedTab: Int = 0,
     val downloads: List<DownloadItem> = emptyList(),
@@ -111,17 +113,47 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         val job = viewModelScope.launch {
             _state.update { it.copy(loadingPhotos = true, error = null) }
             runCatching { withContext(Dispatchers.IO) { repository.listPhotos() } }
-                .onSuccess { (total, photos) ->
+                .onSuccess { (total, photos, hasMore) ->
                     if (!sessions.isCurrent(generation)) return@onSuccess
                     _state.update {
                         it.copy(
                             loadingPhotos = false,
                             totalPhotoCount = total,
                             photos = photos.filter { photo -> photo.isJpeg || photo.isRaw },
+                            hasMore = hasMore,
                         )
                     }
                 }
                 .onFailure { error -> handleOperationFailure(error, generation) }
+        }
+        sessions.track(generation, job)
+    }
+
+    /** 加载下一页对象信息（追加到现有列表之后）。 */
+    fun loadMorePhotos() {
+        val state = _state.value
+        if (state.connectionStatus != ConnectionStatus.CONNECTED || state.loadingPhotos || state.loadingMore || !state.hasMore) return
+        val generation = sessions.generation
+        val loaded = state.photos
+        val job = viewModelScope.launch {
+            _state.update { it.copy(loadingMore = true, error = null) }
+            runCatching { withContext(Dispatchers.IO) { repository.listPhotos(loaded) } }
+                .onSuccess { (total, photos, hasMore) ->
+                    if (!sessions.isCurrent(generation)) return@onSuccess
+                    _state.update {
+                        it.copy(
+                            loadingMore = false,
+                            totalPhotoCount = total,
+                            photos = photos.filter { photo -> photo.isJpeg || photo.isRaw },
+                            hasMore = hasMore,
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    if (!sessions.isCurrent(generation)) return@onFailure
+                    _state.update { it.copy(loadingMore = false) }
+                    handleOperationFailure(error, generation)
+                }
         }
         sessions.track(generation, job)
     }

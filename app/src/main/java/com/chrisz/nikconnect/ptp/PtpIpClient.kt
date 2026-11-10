@@ -1,5 +1,6 @@
 package com.chrisz.nikconnect.ptp
 
+import android.util.Log
 import java.io.ByteArrayOutputStream
 import java.io.Closeable
 import java.io.IOException
@@ -97,18 +98,36 @@ internal class PtpIpClient(
         }
     }
 
+    /**
+     * 全量读取句柄列表，再分页读取对象信息（每页 [pageSize] 个，最新的在前）。
+     * 返回总句柄数、已读对象列表、是否还有下一页。每页耗时打点输出便于真机调优。
+     */
     @Synchronized
-    fun listPhotos(limit: Int = 120): Pair<Int, List<PhotoObject>> {
+    fun listPhotos(
+        alreadyLoaded: List<PhotoObject> = emptyList(),
+        pageSize: Int = 60,
+    ): Triple<Int, List<PhotoObject>, Boolean> {
         val handles = decodeU32Array(
             checked(transaction(OpCode.GET_OBJECT_HANDLES, listOf(0xffffffffL, 0, 0)), "读取文件列表").data,
         )
-        val photos = handles.asReversed().take(limit).map { handle ->
+        // 相机返回旧→新，展示用最新优先
+        val newestFirst = handles.asReversed()
+        val start = alreadyLoaded.size
+        if (start >= newestFirst.size) return Triple(handles.size, alreadyLoaded, false)
+        val pageHandles = newestFirst.drop(start).take(pageSize)
+        val pageStart = System.currentTimeMillis()
+        val page = pageHandles.map { handle ->
             parseObjectInfo(
                 handle,
                 checked(transaction(OpCode.GET_OBJECT_INFO, listOf(handle)), "读取文件信息").data,
             )
         }
-        return handles.size to photos
+        Log.i(
+            TAG,
+            "GetObjectInfo page: offset=$start size=${page.size} elapsed=${System.currentTimeMillis() - pageStart}ms",
+        )
+        val next = start + page.size
+        return Triple(handles.size, alreadyLoaded + page, next < newestFirst.size)
     }
 
     @Synchronized
@@ -235,5 +254,6 @@ internal class PtpIpClient(
 
     companion object {
         const val CHUNK_SIZE = 4 * 1024 * 1024
+        private const val TAG = "PtpIpClient"
     }
 }
