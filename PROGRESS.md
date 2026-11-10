@@ -37,6 +37,15 @@
 
 - **改名后为新应用身份**：applicationId 变化，新 APK 安装不会覆盖旧 "ZF Relay"，需手动卸载旧应用；旧应用已发布的相册文件留在 `Pictures/ZF Relay`，新文件写入 `Pictures/NiKConnect`。
 
+## 2026-11-10 · 0.2 批次 2：ViewModel/传输页接入下载队列
+
+- MainViewModel 弃用旧的 downloads 自管状态：新增 `downloader` 快照字段（每次连接成功刷新），`DownloadQueue` 长期挂在 viewModelScope，`queue.tasks` collect 进 UiState.downloads。
+- DownloadStatus 扩展为 WAITING/DOWNLOADING/COMPLETED/FAILED/CANCELLED，映射自 QueueStatus。
+- 传输页（MainScreen.kt TransferScreen）新增"排队中/已取消"状态显示；等待/执行中任务有"取消"按钮（queue.cancel）；失败/取消任务有"重试"按钮（重新 enqueue，队列去重逻辑自动重置）。
+- 图库下载按钮不再受"当前有下载"限制——串行队列允许排队；重复点击同一张由队列去重。
+- disconnect/invalidateSession 时 downloader 置空并 cancelAll：等待/执行中任务标 CANCELLED，COMPLETED/FAILED 记录保留。
+- 29 项 JVM 测试全过；lintDebug + assembleDebug 通过。
+
 ## 开放问题
 
 1. 真实图库规模（120 / 300 / 更大）→ 决定 0.2 分页与批量元数据优先级。

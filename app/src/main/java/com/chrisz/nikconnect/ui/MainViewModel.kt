@@ -22,12 +22,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 internal enum class ConnectionStatus { DISCONNECTED, CONNECTING, CONNECTED, ERROR }
-internal enum class DownloadStatus { DOWNLOADING, COMPLETED, FAILED }
+
+internal enum class DownloadStatus { WAITING, DOWNLOADING, COMPLETED, FAILED, CANCELLED }
 
 internal data class DownloadItem(
     val photo: PhotoObject,
     val transferred: Long = 0,
-    val status: DownloadStatus = DownloadStatus.DOWNLOADING,
+    val status: DownloadStatus = DownloadStatus.WAITING,
     val error: String? = null,
     val uri: String? = null,
 )
@@ -43,6 +44,7 @@ internal data class UiState(
     val downloads: List<DownloadItem> = emptyList(),
 ) {
     val downloading: Boolean get() = downloads.any { it.status == DownloadStatus.DOWNLOADING }
+    val canDownload: Boolean get() = connectionStatus == ConnectionStatus.CONNECTED && !downloading
 }
 
 internal class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -52,8 +54,31 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
 
+    /** 当前连接对应的下载器快照；队列执行体每任务读取一次。 */
+    @Volatile
+    private var downloader: PhotoDownloader? = null
+
+    private val downloadQueue = DownloadQueue(
+        scope = viewModelScope,
+        execute = { photo, onProgress ->
+            val downloader = checkNotNull(downloader) { "相机已断开，请重新连接" }
+            val uri = downloader.download(photo, onProgress)
+            uri.toString()
+        },
+        onError = { error ->
+            if (repository.isConnected) handleOperationFailure(error, sessions.generation)
+        },
+    )
+
     init {
         PhotoDownloader.cleanupStalePartials(application)
+        viewModelScope.launch {
+            downloadQueue.tasks.collect { tasks ->
+                _state.update { state ->
+                    state.copy(downloads = tasks.map { it.toDownloadItem() })
+                }
+            }
+        }
     }
 
     fun connect(manualHost: String) {
@@ -64,6 +89,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
             runCatching { withContext(Dispatchers.IO) { repository.connect(manualHost) } }
                 .onSuccess { info ->
                     if (!sessions.isCurrent(generation)) return@onSuccess
+                    downloader = repository.downloader()
                     _state.update {
                         it.copy(connectionStatus = ConnectionStatus.CONNECTED, deviceInfo = info, selectedTab = 0)
                     }
@@ -118,50 +144,33 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun download(photo: PhotoObject) {
-        if (
-            _state.value.connectionStatus != ConnectionStatus.CONNECTED ||
-            _state.value.downloading ||
-            !photo.isJpeg
-        ) return
-        val generation = sessions.generation
-        val item = DownloadItem(photo)
-        _state.update { state ->
-            state.copy(downloads = listOf(item) + state.downloads.filterNot { it.photo.handle == photo.handle })
-        }
-        val job = viewModelScope.launch {
-            runCatching {
-                repository.downloader().download(photo) { transferred ->
-                    updateDownload(photo.handle, generation) { it.copy(transferred = transferred) }
-                }
-            }.onSuccess { uri ->
-                updateDownload(photo.handle, generation) {
-                    it.copy(
-                        transferred = photo.size,
-                        status = DownloadStatus.COMPLETED,
-                        uri = uri.toString(),
-                    )
-                }
-            }.onFailure { error ->
-                if (error !is CancellationException) {
-                    updateDownload(photo.handle, generation) {
-                        it.copy(status = DownloadStatus.FAILED, error = humanError(error))
-                    }
-                    handleOperationFailure(error, generation)
-                }
-            }
-        }
-        sessions.track(generation, job)
+        if (_state.value.connectionStatus != ConnectionStatus.CONNECTED || !photo.isJpeg) return
+        downloadQueue.enqueue(listOf(photo))
     }
 
-    private fun updateDownload(handle: Long, generation: Long, transform: (DownloadItem) -> DownloadItem) {
-        if (!sessions.isCurrent(generation)) return
-        _state.update { state ->
-            if (!sessions.isCurrent(generation)) return@update state
-            state.copy(downloads = state.downloads.map { item ->
-                if (item.photo.handle == handle) transform(item) else item
-            })
-        }
+    /** 重试失败/取消的任务；队列的去重逻辑会重置后重新排队。 */
+    fun retryDownload(handle: Long) {
+        val task = downloadQueue.tasks.value.firstOrNull { it.photo.handle == handle } ?: return
+        downloadQueue.enqueue(listOf(task.photo))
     }
+
+    fun cancelDownload(handle: Long) {
+        downloadQueue.cancel(handle)
+    }
+
+    private fun QueueTask.toDownloadItem() = DownloadItem(
+        photo = photo,
+        transferred = transferred,
+        status = when (status) {
+            QueueStatus.WAITING -> DownloadStatus.WAITING
+            QueueStatus.RUNNING -> DownloadStatus.DOWNLOADING
+            QueueStatus.COMPLETED -> DownloadStatus.COMPLETED
+            QueueStatus.FAILED -> DownloadStatus.FAILED
+            QueueStatus.CANCELLED -> DownloadStatus.CANCELLED
+        },
+        error = error,
+        uri = uri,
+    )
 
     private fun handleOperationFailure(error: Throwable, generation: Long) {
         if (error is CancellationException || !sessions.isCurrent(generation)) return
@@ -182,6 +191,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
 
     fun disconnect() {
         invalidateSession()
+        downloadQueue.cancelAll()
         repository.close()
         _state.value = UiState()
     }
@@ -192,6 +202,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
             previousConnectionId?.let { PhotoDownloader.cleanupPartials(getApplication(), it) }
         }
         synchronized(thumbnailCache) { thumbnailCache.evictAll() }
+        downloader = null
         return generation
     }
 
