@@ -76,6 +76,7 @@ internal fun NiKConnectApp(model: MainViewModel) {
         onRefresh = model::refreshPhotos,
         onDownload = model::download,
         onDownloadAll = model::downloadAll,
+        onLoadMore = model::loadMorePhotos,
         onRetryDownload = model::retryDownload,
         onCancelDownload = model::cancelDownload,
         onDisconnect = model::disconnect,
@@ -92,6 +93,7 @@ private fun NiKConnectContent(
     onRefresh: () -> Unit,
     onDownload: (PhotoObject) -> Unit,
     onDownloadAll: (List<PhotoObject>) -> Unit,
+    onLoadMore: () -> Unit,
     onRetryDownload: (Long) -> Unit,
     onCancelDownload: (Long) -> Unit,
     onDisconnect: () -> Unit,
@@ -102,7 +104,7 @@ private fun NiKConnectContent(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("ZF RELAY", fontWeight = FontWeight.Black) },
+                title = { Text("NIKCONNECT", fontWeight = FontWeight.Black) },
                 actions = {
                     if (connected) {
                         IconButton(onClick = onRefresh) {
@@ -139,7 +141,7 @@ private fun NiKConnectContent(
             if (!connected) {
                 ConnectionScreen(state, onConnect)
             } else if (state.selectedTab == 0) {
-                GalleryScreen(state, onDownload, onDownloadAll, thumbnailLoader)
+                GalleryScreen(state, onDownload, onDownloadAll, onLoadMore, thumbnailLoader)
             } else {
                 TransferScreen(state, onRetryDownload, onCancelDownload)
             }
@@ -220,6 +222,7 @@ private fun GalleryScreen(
     state: UiState,
     onDownload: (PhotoObject) -> Unit,
     onDownloadAll: (List<PhotoObject>) -> Unit,
+    onLoadMore: () -> Unit,
     thumbnailLoader: suspend (Long) -> ByteArray,
 ) {
     var selectionMode by rememberSaveable { mutableStateOf(false) }
@@ -289,6 +292,19 @@ private fun GalleryScreen(
                             onDownload = onDownload,
                             thumbnailLoader = thumbnailLoader,
                         )
+                    }
+                    if (state.hasMore) {
+                        item(key = "load-more") {
+                            Box(Modifier.fillMaxWidth().padding(vertical = 16.dp), contentAlignment = Alignment.Center) {
+                                if (state.loadingMore) {
+                                    CircularProgressIndicator(Modifier.size(28.dp))
+                                } else {
+                                    TextButton(onClick = onLoadMore) {
+                                        Text("加载更多（${state.photos.size}/${state.totalPhotoCount}）")
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 if (selectionMode) {
@@ -532,6 +548,7 @@ private fun GalleryPreview() {
             onRefresh = {},
             onDownload = {},
             onDownloadAll = {},
+            onLoadMore = {},
             onRetryDownload = {},
             onCancelDownload = {},
             onDisconnect = {},
