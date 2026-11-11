@@ -140,6 +140,39 @@ internal class PtpIpClient(
         return checked(transaction(OpCode.GET_THUMB, listOf(handle)), "读取缩略图").data
     }
 
+    /** B0 探针结果：单个候选 opcode 的探测记录 */
+    data class ProbeResult(val opcode: Int, val supported: Boolean, val responseCode: Int, val dataPreview: ByteArray) {
+        override fun equals(other: Any?): Boolean = this === other
+        override fun hashCode(): Int = opcode
+    }
+
+    /**
+     * B0 技术探针：向相机发送原始厂商命令，返回响应（不抛异常，失败记录 responseCode）。
+     * 用于真机枚举 GetPicCtrlCapability / GetPicCtrlData / AdvancedTransfer 的实际 opcode。
+     */
+    @Synchronized
+    fun probeCommand(opcode: Int, params: List<Long> = emptyList()): ProbeResult {
+        val result = try {
+            transaction(opcode, params)
+        } catch (e: PtpException) {
+            return ProbeResult(opcode, false, e.responseCode ?: -1, ByteArray(0))
+        }
+        return ProbeResult(
+            opcode,
+            result.response.responseCode == ResponseCode.OK,
+            result.response.responseCode,
+            result.data.take(32).toByteArray(),
+        )
+    }
+
+    /** 枚举厂商属性码列表（GetVendorPropCodes 0x9028 候选；标准 0x1014/0x1015 兜底）。 */
+    @Synchronized
+    fun probeVendorPropCodes(): ProbeResult = probeCommand(OpCode.NIKON_GET_VENDOR_PROP_CODES)
+
+    /** 读取指定属性码当前值（标准 GetDevicePropValue，0xD000 厂商区候选）。 */
+    @Synchronized
+    fun readPropValue(propCode: Int): ProbeResult = probeCommand(OpCode.GET_DEVICE_PROP_VALUE, listOf(propCode.toLong() and 0xffffL))
+
     fun copyObject(
         photo: PhotoObject,
         startOffset: Long,

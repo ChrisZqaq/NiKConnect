@@ -9,6 +9,7 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -142,5 +143,93 @@ class PtpIpClientLoopbackTest {
         socket.getOutputStream().write(encodeDataPacket(PacketType.END_DATA, transaction, data))
         socket.getOutputStream().flush()
         respond(socket, transaction, ResponseCode.OK)
+    }
+
+    @Test
+    fun `probeCommand returns supported result with data preview`() {
+        ServerSocket(0, 50, InetAddress.getByName("127.0.0.1")).use { server ->
+            server.soTimeout = 8_000
+            val worker = thread(isDaemon = true) { runCatching { fakeProbeCamera(server, mapOf(0x9028 to byteArrayOf(1, 0, 0, 0, 0x10, 0xD0.toByte()))) } }
+            val client = PtpIpClient(host = "127.0.0.1", port = server.localPort, socketFactory = { Socket(Proxy.NO_PROXY) }, settleDelayMs = 0)
+            client.connect()
+            val probe = client.probeVendorPropCodes()
+            assertTrue(probe.supported)
+            assertEquals(0x9028, probe.opcode)
+            assertEquals(0xD010, ((probe.dataPreview[4].toInt() and 0xFF) or ((probe.dataPreview[5].toInt() and 0xFF) shl 8)))
+            client.close()
+            worker.join(8_000)
+        }
+    }
+
+    @Test
+    fun `probeCommand records failure instead of throwing`() {
+        ServerSocket(0, 50, InetAddress.getByName("127.0.0.1")).use { server ->
+            server.soTimeout = 8_000
+            val worker = thread(isDaemon = true) { runCatching { fakeProbeCamera(server, mapOf(0x9201 to null)) } }
+            val client = PtpIpClient(host = "127.0.0.1", port = server.localPort, socketFactory = { Socket(Proxy.NO_PROXY) }, settleDelayMs = 0)
+            client.connect()
+            val probe = client.probeCommand(OpCode.NIKON_ADVANCED_TRANSFER)
+            assertFalse(probe.supported)
+            assertEquals(0x2005, probe.responseCode) // OperationNotSupported
+            client.close()
+            worker.join(8_000)
+        }
+    }
+
+    @Test
+    fun `readPropValue sends prop code parameter`() {
+        ServerSocket(0, 50, InetAddress.getByName("127.0.0.1")).use { server ->
+            server.soTimeout = 8_000
+            val worker = thread(isDaemon = true) { runCatching { fakeProbeCamera(server, mapOf(0x1015 to byteArrayOf(1, 0, 0, 0))) } }
+            val client = PtpIpClient(host = "127.0.0.1", port = server.localPort, socketFactory = { Socket(Proxy.NO_PROXY) }, settleDelayMs = 0)
+            client.connect()
+            val probe = client.readPropValue(0xD010)
+            assertTrue(probe.supported)
+            client.close()
+            worker.join(8_000)
+        }
+    }
+
+    /**
+     * 探针专用假相机：按 opcode→data 映射应答（null=回 OperationNotSupported），
+     * OPEN_SESSION/GET_DEVICE_INFO 与标准 fakeCamera 相同，之后按序应答任意命令。
+     */
+    private fun fakeProbeCamera(server: ServerSocket, responses: Map<Int, ByteArray?>) {
+        val command = server.accept()
+        command.soTimeout = 8_000
+        readPacket(command.getInputStream())
+        val ack = LittleEndianWriter()
+        ack.u32(88)
+        ack.bytes(ByteArray(16))
+        "Fake Probe".forEach { ack.u16(it.code) }
+        ack.u16(0)
+        ack.u32(0x00010000)
+        writePacket(command.getOutputStream(), PacketType.INIT_COMMAND_ACK, ack.toByteArray())
+
+        val event = server.accept()
+        event.soTimeout = 8_000
+        readPacket(event.getInputStream())
+        writePacket(event.getOutputStream(), PacketType.INIT_EVENT_ACK)
+
+        val session = readOperation(command)
+        assertEquals(OpCode.OPEN_SESSION, session.first)
+        respond(command, session.second, ResponseCode.OK)
+
+        val device = readOperation(command)
+        assertEquals(OpCode.GET_DEVICE_INFO, device.first)
+        respondWithData(command, device.second, deviceInfoDataset())
+
+        // 后续命令按映射应答（顺序不限，循环到客户端关闭）
+        while (true) {
+            val op = try { readOperation(command) } catch (e: Exception) { return }
+            val data = responses[op.first]
+            if (data != null) {
+                respondWithData(command, op.second, data)
+            } else if (responses.containsKey(op.first)) {
+                respond(command, op.second, 0x2005)
+            } else {
+                respond(command, op.second, 0x2005)
+            }
+        }
     }
 }

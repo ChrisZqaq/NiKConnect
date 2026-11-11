@@ -165,6 +165,14 @@
 - B0/B1 建议路线：相机端 PTP + NP3 本地导入导出，不走云 API。
 - 0.4 进展：用户确认"取消下载无残片"（补做项③通过）。
 
+## 2026-11-11 · B0 探针简化模型确认 + JVM 层 PTP 探针封装
+
+- 用户确认 B0 简化路线：不做 NP3 解析，App 仅做云创方案浏览（元数据）+ 相机端 PTP 方案读写；传输由云创↔相机完成。
+- PtpPackets.kt：OpCode 补 GET_DEVICE_PROP_DESC/VALUE/SET_DEVICE_PROP_VALUE(0x1014/15/16)、NIKON_ADVANCED_TRANSFER(0x9201 候选)、NIKON_GET_VENDOR_PROP_CODES(0x9028 候选)；新增 PropCode.NIKON_VENDOR_BASE=0xD000。
+- PtpIpClient.kt：probeCommand(opcode,params)（失败记 responseCode 不抛）、probeVendorPropCodes()、readPropValue(propCode)；ProbeResult 数据类。
+- 测试：LoopbackTest 增 3 用例（探针成功带数据预览/失败记 0x2005/属性码参数下发），fakeProbeCamera 假相机按 opcode 映射应答。全套测试通过。
+- 真机待验：opcode 实际值（0x9028/0x9201 是候选）、云创推送触发方式（相机连云创 Wi-Fi vs 主动命令）。
+
 ## 开放问题
 
 1. 真实图库规模（120 / 300 / 更大）→ 决定 0.2 分页与批量元数据优先级。

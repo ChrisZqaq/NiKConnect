@@ -29,11 +29,22 @@ internal object OpCode {
     const val GET_DEVICE_INFO = 0x1001
     const val OPEN_SESSION = 0x1002
     const val CLOSE_SESSION = 0x1003
+    const val GET_DEVICE_PROP_DESC = 0x1014
+    const val GET_DEVICE_PROP_VALUE = 0x1015
+    const val SET_DEVICE_PROP_VALUE = 0x1016
     const val GET_OBJECT_HANDLES = 0x1007
     const val GET_OBJECT_INFO = 0x1008
     const val GET_THUMB = 0x100a
     const val GET_PARTIAL_OBJECT = 0x101b
     const val NIKON_GET_LARGE_THUMB = 0x90c4
+    // B0 探针：尼康厂商扩展（具体 opcode 待 Zf 真机枚举，先按 ZRelay/公开资料候选值）
+    const val NIKON_ADVANCED_TRANSFER = 0x9201
+    const val NIKON_GET_VENDOR_PROP_CODES = 0x9028
+}
+
+internal object PropCode {
+    /** 尼康厂商属性码区域 0xD000+（0xD010=PictureControl 相关候选，真机枚举确认） */
+    const val NIKON_VENDOR_BASE = 0xD000
 }
 
 internal object ResponseCode {
