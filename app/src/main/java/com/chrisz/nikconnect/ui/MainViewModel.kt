@@ -1,6 +1,7 @@
 package com.chrisz.nikconnect.ui
 
 import android.app.Application
+import android.content.Context
 import android.util.LruCache
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -44,6 +45,7 @@ internal data class UiState(
     val hasMore: Boolean = false,
     val error: String? = null,
     val selectedTab: Int = 0,
+    val galleryViewTier: Int = 0,
     val downloads: List<DownloadItem> = emptyList(),
 ) {
     val downloading: Boolean get() = downloads.any { it.status == DownloadStatus.DOWNLOADING }
@@ -54,7 +56,8 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     private val repository = CameraRepository(application)
     private val sessions = SessionController()
     private val thumbnailCache = LruCache<Long, ByteArray>(24)
-    private val _state = MutableStateFlow(UiState())
+    private val prefs = application.getSharedPreferences("ui_prefs", Context.MODE_PRIVATE)
+    private val _state = MutableStateFlow(UiState(galleryViewTier = prefs.getInt("gallery_view_tier", 0)))
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     /** 当前连接对应的下载器快照；队列执行体每任务读取一次。 */
@@ -248,6 +251,12 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun selectTab(index: Int) = _state.update { it.copy(selectedTab = index) }
+
+    /** 切换图库视图档位（0=大 1=中 2=小），持久化到本地。 */
+    fun setGalleryViewTier(tier: Int) {
+        prefs.edit().putInt("gallery_view_tier", tier).apply()
+        _state.update { it.copy(galleryViewTier = tier) }
+    }
 
     fun disconnect() {
         invalidateSession()
