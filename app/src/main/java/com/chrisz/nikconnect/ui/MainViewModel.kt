@@ -2,6 +2,7 @@ package com.chrisz.nikconnect.ui
 
 import android.app.Application
 import android.content.Context
+import android.os.PowerManager
 import android.util.LruCache
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -53,7 +54,10 @@ internal data class UiState(
 }
 
 internal class MainViewModel(application: Application) : AndroidViewModel(application) {
+    private val appContext = application
     private val repository = CameraRepository(application)
+    private val wakeLock = (appContext.getSystemService(Context.POWER_SERVICE) as PowerManager)
+        .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "NiKConnect:download")
     private val sessions = SessionController()
     private val thumbnailCache = LruCache<Long, ByteArray>(24)
     private val prefs = application.getSharedPreferences("ui_prefs", Context.MODE_PRIVATE)
@@ -67,9 +71,13 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     private val downloadQueue = DownloadQueue(
         scope = viewModelScope,
         execute = { photo, onProgress ->
-            val downloader = checkNotNull(downloader) { "相机已断开，请重新连接" }
-            val uri = downloader.download(photo, onProgress)
-            uri.toString()
+            acquireWakeLock()
+            try {
+                val downloader = checkNotNull(downloader) { "相机已断开，请重新连接" }
+                downloader.download(photo, onProgress).toString()
+            } finally {
+                maybeReleaseWakeLock()
+            }
         },
         onError = { error ->
             if (repository.isConnected) handleOperationFailure(error, sessions.generation)
@@ -198,6 +206,15 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
             handleOperationFailure(error, generation)
             throw error
         }
+    }
+
+    private fun acquireWakeLock() {
+        if (!wakeLock.isHeld) wakeLock.acquire(30 * 60 * 1000L)  // 最长 30 分钟防泄漏
+    }
+
+    private fun maybeReleaseWakeLock() {
+        val active = downloadQueue.tasks.value.any { it.status == QueueStatus.WAITING || it.status == QueueStatus.RUNNING }
+        if (!active && wakeLock.isHeld) wakeLock.release()
     }
 
     fun download(photo: PhotoObject) {
