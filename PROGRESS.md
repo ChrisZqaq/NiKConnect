@@ -137,6 +137,14 @@
 - 断开 Wi-Fi 后无重连按钮（用户反馈②）：确认为相机热点随断连关闭所致，非 bug；重连按钮仅在 App 内断连（非 Wi-Fi 消失）后出现。
 - 31 项 JVM 测试全过；lintDebug + assembleDebug 通过。
 
+## 2026-11-11 · 跨会话"已下载"持久化（0.3 收尾）
+
+- 连接成功后查询 MediaStore（RELATIVE_PATH = Pictures/NiKConnect）得到已存在文件名集合 downloadedFilenames，存入 UiState。
+- 图库角标 = 会话内 COMPLETED 句柄 ∪ 文件名在 MediaStore 中的句柄——新会话连上相机后，之前下载过的照片也显示绿色对勾。
+- 查看器"下载这张"同样合并两个来源；下载过即禁用显示"已下载"。
+- 边界：按 DISPLAY_NAME 精确匹配（相机原始文件名）；用户在系统相册删图后 MediaStore 查不到，角标消失，重新下载行为正确。
+- 31 项 JVM 测试全过；lintDebug + assembleDebug 通过。
+
 ## 开放问题
 
 1. 真实图库规模（120 / 300 / 更大）→ 决定 0.2 分页与批量元数据优先级。
