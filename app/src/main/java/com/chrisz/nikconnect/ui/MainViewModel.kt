@@ -47,6 +47,7 @@ internal data class UiState(
     val error: String? = null,
     val selectedTab: Int = 0,
     val galleryViewTier: Int = 0,
+    val lastHost: String? = null,
     val downloads: List<DownloadItem> = emptyList(),
 ) {
     val downloading: Boolean get() = downloads.any { it.status == DownloadStatus.DOWNLOADING }
@@ -61,7 +62,12 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     private val sessions = SessionController()
     private val thumbnailCache = LruCache<Long, ByteArray>(24)
     private val prefs = application.getSharedPreferences("ui_prefs", Context.MODE_PRIVATE)
-    private val _state = MutableStateFlow(UiState(galleryViewTier = prefs.getInt("gallery_view_tier", 0)))
+    private val _state = MutableStateFlow(
+        UiState(
+            galleryViewTier = prefs.getInt("gallery_view_tier", 0),
+            lastHost = prefs.getString("last_host", null),
+        ),
+    )
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     /** 当前连接对应的下载器快照；队列执行体每任务读取一次。 */
@@ -97,6 +103,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
 
     fun connect(manualHost: String) {
         if (_state.value.connectionStatus == ConnectionStatus.CONNECTING) return
+        if (manualHost.isNotBlank()) prefs.edit().putString("last_host", manualHost).apply()
         val generation = invalidateSession()
         _state.value = UiState(connectionStatus = ConnectionStatus.CONNECTING)
         val job = viewModelScope.launch {
@@ -105,7 +112,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
                     if (!sessions.isCurrent(generation)) return@onSuccess
                     downloader = repository.downloader()
                     _state.update {
-                        it.copy(connectionStatus = ConnectionStatus.CONNECTED, deviceInfo = info, selectedTab = 0)
+                        it.copy(connectionStatus = ConnectionStatus.CONNECTED, deviceInfo = info, selectedTab = 0, error = null)
                     }
                     repository.clientOrNull()?.let { client ->
                         client.onDisconnected = {
