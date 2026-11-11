@@ -97,7 +97,8 @@
       font-size: 14px;
       font-weight: 600;
     }
-    .primary-button { background: var(--accent); color: #211b12; }
+    .primary-button { border: 1px solid var(--accent); background: transparent; color: var(--accent); }
+    .primary-button.writing { background: var(--accent); color: #211b12; }
     .secondary-button { border: 1px solid var(--line); background: var(--surface); color: var(--text); }
     .hairline { height: 1px; background: var(--line); }
     .scroll-area { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
@@ -135,7 +136,8 @@
     .state-dot { width: 6px; height: 6px; border: 1px solid currentColor; border-radius: 50%; }
     .connection-state.connected { color: var(--connected); }
     .connection-state.connected .state-dot { background: currentColor; }
-    .connection-content { flex: 1; display: flex; flex-direction: column; padding: 0 20px 18px; }
+    .connection-content { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; scrollbar-width: none; padding: 0 20px 18px; }
+    .connection-content::-webkit-scrollbar { display: none; }
     .paired-label { padding: 12px 0 14px; border-top: 1px solid var(--line); }
     .camera-list { display: grid; gap: 8px; }
     .camera-item {
@@ -155,6 +157,17 @@
     .camera-item h2 { font-size: 18px; font-weight: 560; font-family: var(--font-mono); }
     .camera-meta { margin-top: 8px; color: var(--muted); font-size: 11px; line-height: 1.75; }
     .camera-item .icon { color: var(--faint); width: 18px; }
+    .recent-transfer { width: 100%; margin-top: 16px; text-align: left; }
+    .recent-heading { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 10px; }
+    .recent-heading span:last-child { font-family: var(--font-mono); }
+    .recent-photos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 9px; }
+    .recent-photos img { width: 100%; height: 48px; object-fit: cover; border-radius: 3px; }
+    .camera-status-card { display: grid; grid-template-columns: 1fr 1fr; margin-top: 14px; padding: 11px 0; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); }
+    .camera-status-cell { padding: 0 12px; }
+    .camera-status-cell + .camera-status-cell { border-left: 1px solid var(--line); }
+    .camera-status-cell span { display: block; color: var(--muted); font-size: 9px; }
+    .camera-status-cell strong { display: block; margin-top: 5px; font: 12px/1.2 var(--font-mono); font-weight: 500; }
+    .camera-status-cell small { display: block; margin-top: 4px; color: var(--muted); font: 9px/1.2 var(--font-mono); }
     .portfolio-entry {
       width: 100%;
       min-height: 64px;
@@ -287,7 +300,8 @@
     .viewer-meta { padding: 18px 20px; border-top: 1px solid var(--line); }
     .viewer-meta h3 { font: 15px/1.3 var(--font-mono); font-weight: 500; }
     .viewer-meta p { margin: 8px 0 16px; color: var(--muted); font: 11px/1.6 var(--font-mono); }
-    .viewer-meta .secondary-button { width: 100%; }
+    .viewer-actions { display: grid; gap: 8px; }
+    .viewer-actions button { width: 100%; }
 
     /* ========== 界面 4：传输队列 ========== */
     .background-note { flex: none; padding: 10px 16px; color: var(--muted); font-size: 10px; text-align: center; border-bottom: 1px solid var(--line); }
@@ -329,6 +343,12 @@
     .written-state.written { color: var(--accent); }
     .written-state.written .written-dot { background: currentColor; }
     .recipe-params { margin-top: 14px; color: var(--muted); font: 9px/1.5 var(--font-mono); letter-spacing: -.02em; }
+    .recipe-summary { padding: 14px 18px 8px; border-bottom: 1px solid var(--line); }
+    .recipe-summary h3 { margin-bottom: 7px; color: var(--muted); font-size: 10px; font-weight: 500; letter-spacing: .08em; }
+    .summary-row { min-height: 31px; display: flex; align-items: center; border-bottom: 1px solid var(--line); font-size: 11px; }
+    .summary-row:last-child { border-bottom: 0; }
+    .summary-row > span { flex: 1; color: var(--muted); }
+    .summary-value { min-width: 64px; text-align: right; font: 11px/1 var(--font-mono); font-weight: 400; }
     .recipe-strip-label { display: flex; justify-content: space-between; padding: 15px 18px 10px; color: var(--muted); font-size: 10px; }
     .recipe-strip-label span:last-child { font-family: var(--font-mono); }
     .recipe-carousel { display: flex; gap: 9px; overflow-x: auto; padding: 0 18px 18px; }
@@ -350,7 +370,8 @@
     .slot-cell { position: relative; height: 44px; overflow: hidden; border: 1px solid var(--line); border-radius: 4px; text-align: left; padding: 5px 8px; isolation: isolate; }
     .slot-cell::before { content: ""; position: absolute; inset: 0; z-index: -1; background: var(--accent); transform: scaleY(0); transform-origin: bottom; }
     .slot-cell.selected { border-color: var(--accent); }
-    .slot-cell.writing::before { transform: scaleY(1); transition: transform 1.45s linear; }
+    .slot-cell.writing::before { transform: scaleY(1); transition: transform .6s linear; }
+    .slot-panel.writing .slot-cell:not(.selected) { opacity: .28; }
     .slot-cell.complete::before { transform: scaleY(1); }
     .slot-cell.complete { color: #211b12; }
     .slot-number { display: block; font: 11px/1 var(--font-mono); }
@@ -392,7 +413,7 @@
     .group-card img { width: 84px; height: 64px; object-fit: cover; border-radius: 3px; }
     .group-copy { flex: 1; }
     .group-copy strong { display: block; font-size: 13px; font-weight: 520; }
-    .group-copy p { margin-top: 6px; color: var(--muted); font: 10px/1.5 var(--font-mono); }
+    .group-copy p, .group-duration { display: block; margin-top: 6px; color: var(--muted); font: 10px/1.5 var(--font-mono); }
     .group-card > .icon { width: 16px; color: var(--faint); }
     .collection-overlay { position: absolute; inset: 0; z-index: 50; display: none; flex-direction: column; background: var(--bg); }
     .collection-overlay.visible { display: flex; }
@@ -453,6 +474,8 @@
               <svg class="icon"><use href="#i-chevron"/></svg>
             </button>
           </div>
+          <button class="recent-transfer" data-go="gallery"><span class="recent-heading"><span>上次传输</span><span>3 张 · 18:42</span></span><span class="recent-photos"><img src="__LANDSCAPE__" alt="最近传输照片 1" style="object-position:28% 38%;filter:brightness(.86) saturate(.8)"><img src="__LANDSCAPE__" alt="最近传输照片 2" style="object-position:62% 46%;filter:brightness(.94) sepia(.12)"><img src="__LANDSCAPE__" alt="最近传输照片 3" style="object-position:78% 64%;filter:brightness(1.02) contrast(1.08)"></span></button>
+          <div class="camera-status-card"><div class="camera-status-cell"><span>存储卡</span><strong>512 GB</strong><small>剩余 318 GB</small></div><div class="camera-status-cell"><span>固件版本</span><strong>1.10</strong><small>Z 6III</small></div></div>
           <button class="portfolio-entry" data-go="portfolio">
             <svg class="icon"><use href="#i-works"/></svg>
             <span class="entry-copy"><strong>作品集</strong><small>年度拍摄统计与自动分组</small></span>
@@ -531,7 +554,7 @@
         <div class="photo-viewer" id="photo-viewer">
           <div class="app-header"><button class="icon-button" id="close-viewer" aria-label="关闭照片"><svg class="icon"><use href="#i-close"/></svg></button><div class="header-title"><h1>照片预览</h1></div></div>
           <img class="viewer-photo" id="viewer-photo" src="__LANDSCAPE__" alt="照片大图预览">
-          <div class="viewer-meta"><h3 id="viewer-name">DSC_0837.NEF</h3><p id="viewer-info">6048 × 4024 · ISO 400 · f/2.8 · 1/250</p><button class="secondary-button" id="viewer-select">选择此照片</button></div>
+          <div class="viewer-meta"><h3 id="viewer-name">DSC_0837.NEF</h3><p id="viewer-info">6048 × 4024 · ISO 400 · f/2.8 · 1/250</p><div class="viewer-actions"><button class="primary-button" id="download-this"><svg class="icon" style="width:17px"><use href="#i-download"/></svg>下载这张</button><button class="secondary-button" id="viewer-select">选择此照片</button></div></div>
         </div>
       </section>
 
@@ -552,11 +575,12 @@
         <div class="recipe-scroll">
           <div class="recipe-preview" id="recipe-preview"><img id="recipe-preview-image" src="__LANDSCAPE__" alt="当前滤镜预览"><span class="compare-label" id="compare-label">长按查看原图</span></div>
           <div class="recipe-meta"><div class="recipe-title-row"><div class="recipe-title-copy"><h2 id="recipe-name">暖银盐 02</h2><p id="recipe-author">Takashi Mori · Imaging Recipe</p></div><div class="written-state written" id="written-state"><span class="written-dot"></span><span>已写入相机</span></div></div><div class="recipe-params" id="recipe-params">QUICK SHARP −1 · CONTRAST +2 · SATURATION −1</div></div>
+          <div class="recipe-summary" id="recipe-summary"><h3>参数摘要</h3><div class="summary-row"><span>对比度</span><strong class="summary-value">+2</strong></div><div class="summary-row"><span>清晰度</span><strong class="summary-value">−1</strong></div><div class="summary-row"><span>饱和度</span><strong class="summary-value">−1</strong></div><div class="summary-row"><span>高光</span><strong class="summary-value">−1</strong></div><div class="summary-row"><span>阴影</span><strong class="summary-value">+1</strong></div><div class="summary-row"><span>色相偏移</span><strong class="summary-value">+0.0</strong></div></div>
           <div class="recipe-strip-label"><span>云创滤镜</span><span id="recipe-position">01 / 06</span></div>
           <div class="recipe-carousel horizontal-scroll" id="recipe-carousel"></div>
         </div>
         <div class="slot-panel" id="slot-panel">
-          <div class="slot-sheet"><div class="slot-heading"><h2>选择相机槽位</h2><button class="icon-button" id="close-slots" aria-label="收起槽位选择"><svg class="icon"><use href="#i-close"/></svg></button></div><p class="slot-description">「<span id="slot-recipe-name">暖银盐 02</span>」写入 Z 6III · 写入后自动读回校验</p><div class="slot-grid" id="slot-grid"></div><div class="write-progress-copy" id="write-progress-copy">选择一个槽位开始写入</div><button class="primary-button" id="confirm-write" disabled>写入所选槽位</button></div>
+          <div class="slot-sheet"><div class="slot-heading"><h2>选择相机槽位</h2><button class="icon-button" id="close-slots" aria-label="收起槽位选择"><svg class="icon"><use href="#i-close"/></svg></button></div><p class="slot-description">「<span id="slot-recipe-name">暖银盐 02</span>」写入 Z 6III · 写入后保存到相机</p><div class="slot-grid" id="slot-grid"></div><div class="write-progress-copy" id="write-progress-copy">选择一个槽位开始写入</div><button class="primary-button" id="confirm-write" disabled>写入所选槽位</button></div>
         </div>
         <div class="recipe-actions"><button class="secondary-button" id="phone-preview">在手机上预览</button><button class="primary-button" id="write-recipe">写入相机</button></div>
         <div class="phone-preview-overlay" id="phone-preview-overlay"><div class="app-header"><div class="header-title"><h1 id="phone-preview-name">暖银盐 02</h1></div><button class="icon-button" id="close-phone-preview" aria-label="关闭手机预览"><svg class="icon"><use href="#i-close"/></svg></button></div><img id="phone-preview-image" src="__LANDSCAPE__" alt="手机滤镜实时预览"><div class="phone-preview-bar"><p>DEVICE PREVIEW · REAL-TIME RENDER</p><button class="secondary-button" id="finish-phone-preview">完成预览</button></div></div>
@@ -795,21 +819,21 @@
 
     /* ========== 界面 3：图库、多选与照片预览 ========== */
     const photoFilters = ["saturate(.8) contrast(1.05)", "sepia(.2) saturate(.8)", "grayscale(.8) contrast(1.15)", "saturate(.65) brightness(.8)", "hue-rotate(-12deg) saturate(.7)", "contrast(1.18) brightness(.9)"];
-    const cameraPhotos = Array.from({ length: 12 }, (_, index) => ({
+    const cameraPhotos = Array.from({ length: 15 }, (_, index) => ({
       id: `camera-${index}`,
       name: `DSC_${String(837 + index).padStart(4, "0")}.${index % 4 === 3 ? "JPG" : index === 10 ? "MOV" : "NEF"}`,
       type: index === 10 ? "VIDEO" : index % 4 === 3 ? "JPEG" : "RAW",
       size: index === 10 ? 428.6 : index % 4 === 3 ? 14.8 : 48.2 + index * .7,
-      filter: photoFilters[index % photoFilters.length],
-      position: `${38 + (index % 4) * 8}% center`
+      filter: `${photoFilters[index % photoFilters.length]} brightness(${0.84 + (index % 5) * 0.06})`,
+      position: `${28 + (index * 17) % 55}% ${30 + (index * 23) % 45}%`
     }));
-    const phonePhotos = Array.from({ length: 12 }, (_, index) => ({
+    const phonePhotos = Array.from({ length: 15 }, (_, index) => ({
       id: `phone-${index}`,
       name: `NKC_${String(1120 + index)}.${index === 8 ? "MOV" : "JPG"}`,
       type: index === 8 ? "VIDEO" : index % 5 === 0 ? "RAW" : "JPEG",
       size: index === 8 ? 182.4 : index % 5 === 0 ? 45.6 : 9.8 + index * .4,
-      filter: photoFilters[(index + 2) % photoFilters.length],
-      position: `${34 + (index % 5) * 7}% center`
+      filter: `${photoFilters[(index + 2) % photoFilters.length]} brightness(${0.86 + (index % 5) * 0.055})`,
+      position: `${31 + (index * 19) % 48}% ${28 + (index * 29) % 48}%`
     }));
     let gallerySource = "camera";
     let galleryFilter = "all";
@@ -908,6 +932,20 @@
     $("#viewer-select").addEventListener("click", () => {
       togglePhotoSelection(viewerPhotoId);
       $("#photo-viewer").classList.remove("visible");
+    });
+    $("#download-this").addEventListener("click", () => {
+      const photo = currentPhotos().find(item => item.id === viewerPhotoId);
+      if (!photo) return;
+      const activeCount = tasks.filter(task => task.status === "active").length;
+      tasks.unshift({
+        id: nextTaskId++, name: photo.name, size: photo.size, progress: 0,
+        status: activeCount < 3 ? "active" : "waiting", speed: activeCount < 3 ? 2.7 : 0
+      });
+      queuePaused = false;
+      queueTouched = true;
+      $("#photo-viewer").classList.remove("visible");
+      navigate("queue");
+      showToast(`${photo.name} 已加入传输队列`);
     });
 
     /* ========== 界面 4：真实走动的后台传输队列 ========== */
@@ -1028,17 +1066,18 @@
     /* ========== 界面 5：滤镜预览与 201–209 槽位写入 ========== */
     const landscapeSource = "__LANDSCAPE__";
     const recipes = [
-      { name: "暖银盐 02", author: "Takashi Mori", filter: "sepia(.18) saturate(.78) contrast(1.08) brightness(.96)", written: true, slot: 201, params: "QUICK SHARP −1 · CONTRAST +2 · SATURATION −1" },
-      { name: "静夜 Pro", author: "Lin Zhao", filter: "saturate(.58) contrast(1.16) brightness(.78) hue-rotate(8deg)", written: true, slot: 202, params: "SHARPENING +1 · CONTRAST +3 · HIGHLIGHT −2" },
-      { name: "Soft Amber", author: "Mika Studio", filter: "sepia(.32) saturate(.72) contrast(.94) brightness(1.05)", written: false, slot: null, params: "CLARITY −2 · CONTRAST −1 · SATURATION −1" },
-      { name: "Forest Cine", author: "North Field", filter: "saturate(.68) hue-rotate(-13deg) contrast(1.12) brightness(.9)", written: false, slot: null, params: "HUE −2 · CONTRAST +2 · SHADOW −1" },
-      { name: "Mono 400", author: "Atelier N", filter: "grayscale(1) contrast(1.22) brightness(.94)", written: false, slot: null, params: "MONOCHROME · GRAIN MEDIUM · CONTRAST +2" },
-      { name: "Daylight 5600", author: "Nikon Recipe", filter: "saturate(.9) contrast(1.03) brightness(1.03)", written: false, slot: null, params: "WB 5600K · CONTRAST 0 · SATURATION 0" }
+      { name: "暖银盐 02", author: "Takashi Mori", filter: "sepia(.18) saturate(.78) contrast(1.08) brightness(.96)", written: true, slot: 201, params: "QUICK SHARP −1 · CONTRAST +2 · SATURATION −1", summary: ["+2", "−1", "−1", "−1", "+1", "+0.0"] },
+      { name: "静夜 Pro", author: "Lin Zhao", filter: "saturate(.58) contrast(1.16) brightness(.78) hue-rotate(8deg)", written: true, slot: 202, params: "SHARPENING +1 · CONTRAST +3 · HIGHLIGHT −2", summary: ["+3", "+1", "−2", "−2", "+1", "+0.8"] },
+      { name: "Soft Amber", author: "Mika Studio", filter: "sepia(.32) saturate(.72) contrast(.94) brightness(1.05)", written: false, slot: null, params: "CLARITY −2 · CONTRAST −1 · SATURATION −1", summary: ["−1", "−2", "−1", "−1", "+2", "+1.2"] },
+      { name: "Forest Cine", author: "North Field", filter: "saturate(.68) hue-rotate(-13deg) contrast(1.12) brightness(.9)", written: false, slot: null, params: "HUE −2 · CONTRAST +2 · SHADOW −1", summary: ["+2", "+1", "−1", "−2", "−1", "−1.3"] },
+      { name: "Mono 400", author: "Atelier N", filter: "grayscale(1) contrast(1.22) brightness(.94)", written: false, slot: null, params: "MONOCHROME · GRAIN MEDIUM · CONTRAST +2", summary: ["+2", "+1", "−3", "0", "+1", "0.0"] },
+      { name: "Daylight 5600", author: "Nikon Recipe", filter: "saturate(.9) contrast(1.03) brightness(1.03)", written: false, slot: null, params: "WB 5600K · CONTRAST 0 · SATURATION 0", summary: ["0", "0", "0", "0", "0", "0.0"] }
     ];
     let selectedRecipe = 0;
     let previewTimer;
     let showingOriginal = false;
     let selectedSlot = 204;
+    let completedSlot = null;
     let writing = false;
 
     function renderRecipe(animate = false) {
@@ -1058,6 +1097,7 @@
       const state = $("#written-state");
       state.classList.toggle("written", recipe.written);
       $("span:last-child", state).textContent = recipe.written ? `已写入相机${recipe.slot ? ` · ${recipe.slot}` : ""}` : "未写入相机";
+      $$(".summary-value", $("#recipe-summary")).forEach((value, index) => { value.textContent = recipe.summary[index]; });
       $("#recipe-carousel").innerHTML = recipes.map((item, index) => `<button class="recipe-card ${index === selectedRecipe ? "selected" : ""} ${item.written ? "written" : ""}" data-recipe="${index}"><img src="${landscapeSource}" alt="${item.name}" style="filter:${item.filter}"><span class="card-dot"></span><strong>${item.name}</strong></button>`).join("");
     }
 
@@ -1101,11 +1141,14 @@
       const occupied = new Map(recipes.filter(recipe => recipe.written && recipe.slot).map(recipe => [recipe.slot, recipe.name]));
       $("#slot-grid").innerHTML = Array.from({ length: 9 }, (_, index) => {
         const slot = 201 + index;
-        return `<button class="slot-cell ${slot === selectedSlot ? "selected" : ""}" data-slot="${slot}" ${writing ? "disabled" : ""}><span class="slot-number">${slot}</span><span class="slot-name">${occupied.get(slot) || "空槽位"}</span></button>`;
+        const complete = slot === completedSlot ? "complete" : "";
+        return `<button class="slot-cell ${slot === selectedSlot ? "selected" : ""} ${complete}" data-slot="${slot}" ${writing ? "disabled" : ""}><span class="slot-number">${slot}</span><span class="slot-name">${occupied.get(slot) || "空槽位"}</span></button>`;
       }).join("");
       $("#slot-recipe-name").textContent = recipes[selectedRecipe].name;
-      $("#confirm-write").textContent = `写入 ${selectedSlot}`;
-      $("#confirm-write").disabled = writing;
+      const confirm = $("#confirm-write");
+      confirm.classList.toggle("writing", writing);
+      confirm.textContent = writing ? `正在写入 ${selectedSlot}…` : completedSlot === selectedSlot ? "已保存" : `写入 ${selectedSlot}`;
+      confirm.disabled = writing || completedSlot === selectedSlot;
     }
 
     function closeSlotPanel() {
@@ -1121,8 +1164,10 @@
         return;
       }
       writing = false;
+      completedSlot = null;
       selectedSlot = recipes[selectedRecipe].slot || 204;
       $("#write-progress-copy").textContent = "选择一个槽位开始写入";
+      panel.classList.remove("writing");
       panel.classList.add("visible");
       $("#write-recipe").textContent = "收起槽位";
       renderSlots();
@@ -1134,32 +1179,32 @@
       selectedSlot = Number(cell.dataset.slot);
       renderSlots();
     });
+
+    function finishWrite() {
+      if (!writing) return;
+      recipes.forEach(recipe => { if (recipe.slot === selectedSlot) { recipe.slot = null; recipe.written = false; } });
+      const recipe = recipes[selectedRecipe];
+      recipe.written = true;
+      recipe.slot = selectedSlot;
+      writing = false;
+      completedSlot = selectedSlot;
+      $("#slot-panel").classList.remove("writing");
+      renderSlots();
+      renderRecipe();
+      $("#write-progress-copy").textContent = `槽位 ${selectedSlot} 已保存`;
+      showToast(`${recipe.name} 已保存到槽位 ${selectedSlot}`);
+    }
+
     $("#confirm-write").addEventListener("click", () => {
       if (writing) return;
       writing = true;
+      completedSlot = null;
+      $("#slot-panel").classList.add("writing");
       renderSlots();
       const cell = $(`[data-slot="${selectedSlot}"]`);
       cell.classList.add("writing");
-      $("#confirm-write").textContent = "正在写入";
-      $("#write-progress-copy").textContent = "01 / 03 · 读取当前槽位与备份信息";
-      setTimeout(() => { if (writing) $("#write-progress-copy").textContent = "02 / 03 · 写入 Picture Control 数据"; }, 520);
-      setTimeout(() => { if (writing) $("#write-progress-copy").textContent = "03 / 03 · 读回校验"; }, 1060);
-      setTimeout(() => {
-        if (!writing) return;
-        recipes.forEach(recipe => { if (recipe.slot === selectedSlot) { recipe.slot = null; recipe.written = false; } });
-        const recipe = recipes[selectedRecipe];
-        recipe.written = true;
-        recipe.slot = selectedSlot;
-        cell.classList.remove("writing");
-        cell.classList.add("complete");
-        $(".slot-name", cell).textContent = recipe.name;
-        $("#write-progress-copy").textContent = `写入完成 · 槽位 ${selectedSlot} 已校验`;
-        $("#confirm-write").textContent = "完成";
-        $("#confirm-write").disabled = true;
-        writing = false;
-        renderRecipe();
-        showToast(`${recipe.name} 已写入槽位 ${selectedSlot}`);
-      }, 1580);
+      $("#write-progress-copy").textContent = `正在写入 ${selectedSlot}…`;
+      setTimeout(finishWrite, 600);
     });
     $("#read-camera").addEventListener("click", () => {
       const button = $("#read-camera");
@@ -1196,8 +1241,8 @@
       $("#stat-body").textContent = data.body;
       $("#stat-lens").textContent = data.lens;
       $("#stat-focal").textContent = data.focal;
-      $("#focal-bars").innerHTML = data.bars.map((value, index) => `<div class="bar-row"><span>${focalLabels[index]}</span><div class="bar-track"><span class="bar-fill" style="width:${value / 40 * 100}%"></span></div><span>${value}%</span></div>`).join("");
-      $("#group-list").innerHTML = groups.map((group, index) => `<button class="group-card" data-group="${index}"><img src="__LANDSCAPE__" alt="${group.place}" style="filter:${photoFilters[index]};object-position:${40 + index * 12}% center"><span class="group-copy"><strong>${group.date} · ${group.place}</strong><p>${group.count} 张 · ${group.duration}</p></span><svg class="icon"><use href="#i-chevron"/></svg></button>`).join("");
+      $("#focal-bars").innerHTML = data.bars.map((value, index) => `<div class="bar-row"><span>${focalLabels[index]}</span><div class="bar-track"><span class="bar-fill" style="width:${data.bars[index] / Math.max(...data.bars) * 100}%"></span></div><span>${value}%</span></div>`).join("");
+      $("#group-list").innerHTML = groups.map((group, index) => `<button class="group-card" data-group="${index}"><img src="__LANDSCAPE__" alt="${group.place}" style="filter:${photoFilters[index]};object-position:${40 + index * 12}% center"><span class="group-copy"><strong>${group.date} · ${group.place}</strong><p class="group-duration">${group.count} 张 · ${group.duration}</p></span><svg class="icon"><use href="#i-chevron"/></svg></button>`).join("");
     }
 
     $$("[data-year]").forEach(button => button.addEventListener("click", () => {

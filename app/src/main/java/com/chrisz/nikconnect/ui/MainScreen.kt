@@ -3,6 +3,8 @@ package com.chrisz.nikconnect.ui
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -55,7 +57,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -84,6 +85,7 @@ internal fun NiKConnectApp(model: MainViewModel) {
         onCancelDownload = model::cancelDownload,
         onDisconnect = model::disconnect,
         onTab = model::selectTab,
+        onViewTier = model::setGalleryViewTier,
         thumbnailLoader = model::thumbnail,
     )
 }
@@ -101,6 +103,7 @@ private fun NiKConnectContent(
     onCancelDownload: (Long) -> Unit,
     onDisconnect: () -> Unit,
     onTab: (Int) -> Unit,
+    onViewTier: (Int) -> Unit,
     thumbnailLoader: suspend (Long) -> ByteArray,
 ) {
     val connected = state.connectionStatus == ConnectionStatus.CONNECTED
@@ -144,7 +147,7 @@ private fun NiKConnectContent(
             if (!connected) {
                 ConnectionScreen(state, onConnect)
             } else if (state.selectedTab == 0) {
-                GalleryScreen(state, onDownload, onDownloadAll, onLoadMore, thumbnailLoader)
+                GalleryScreen(state, onDownload, onDownloadAll, onLoadMore, onViewTier, thumbnailLoader)
             } else {
                 TransferScreen(state, onRetryDownload, onCancelDownload)
             }
@@ -228,10 +231,11 @@ private fun GalleryScreen(
     onDownload: (PhotoObject) -> Unit,
     onDownloadAll: (List<PhotoObject>) -> Unit,
     onLoadMore: () -> Unit,
+    onViewTier: (Int) -> Unit,
     thumbnailLoader: suspend (Long) -> ByteArray,
 ) {
     var selectionMode by rememberSaveable { mutableStateOf(false) }
-    var viewTier by rememberSaveable { mutableIntStateOf(0) }  // 0=大 168dp 1=中 96dp 2=小 64dp
+    val viewTier = state.galleryViewTier
     val viewMinSize = listOf(168.dp, 96.dp, 64.dp)[viewTier]
     val selected = rememberSaveable(state.photos.map { it.handle }) {
         mutableStateOf(setOf<Long>())
@@ -254,7 +258,7 @@ private fun GalleryScreen(
             if (state.photos.isNotEmpty()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = {
-                        viewTier = (viewTier + 1) % VIEW_TIERS.size
+                        onViewTier((viewTier + 1) % VIEW_TIERS.size)
                     }) {
                         Icon(Icons.Default.GridView, contentDescription = "切换视图大小")
                         Spacer(Modifier.width(4.dp))
@@ -307,6 +311,9 @@ private fun GalleryScreen(
                             isSelected = photo.handle in selected.value,
                             onToggleSelect = onToggle,
                             onDownload = onDownload,
+                            onLongPress = if (!selectionMode && state.photos.isNotEmpty()) {
+                                { selectionMode = true; selected.value = setOf(photo.handle) }
+                            } else null,
                             thumbnailLoader = thumbnailLoader,
                         )
                     }
@@ -363,6 +370,7 @@ private fun GalleryScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PhotoCard(
     photo: PhotoObject,
@@ -371,6 +379,7 @@ private fun PhotoCard(
     isSelected: Boolean,
     onToggleSelect: ((Long) -> Unit)?,
     onDownload: (PhotoObject) -> Unit,
+    onLongPress: (() -> Unit)?,
     thumbnailLoader: suspend (Long) -> ByteArray,
 ) {
     val bytes by produceState<ByteArray?>(initialValue = null, photo.handle) {
@@ -387,12 +396,15 @@ private fun PhotoCard(
                 MaterialTheme.colorScheme.surfaceVariant
             },
         ),
-        onClick = {
-            when {
-                selectionMode && onToggleSelect != null -> onToggleSelect(photo.handle)
-                !selectionMode && (photo.isJpeg || photo.isRaw) -> onDownload(photo)
-            }
-        },
+        modifier = Modifier.combinedClickable(
+            onClick = {
+                when {
+                    selectionMode && onToggleSelect != null -> onToggleSelect(photo.handle)
+                    !selectionMode && (photo.isJpeg || photo.isRaw) -> onDownload(photo)
+                }
+            },
+            onLongClick = { onLongPress?.invoke() },
+        ),
     ) {
         Column {
             Box(
@@ -572,6 +584,7 @@ private fun GalleryPreview() {
             onCancelDownload = {},
             onDisconnect = {},
             onTab = {},
+            onViewTier = {},
             thumbnailLoader = { ByteArray(0) },
         )
     }

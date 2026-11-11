@@ -98,6 +98,14 @@
 - 测试：新增 2 个 JVM 用例（close 后回调触发、未连接 close 不触发），31 项全过；lintDebug + assembleDebug 通过。
 - 待真机验证：退后台 >1 分钟不断连、通知显示、断连后 UI 提示。
 
+## 2026-11-11 · 真机反馈修复批次：通知授权/视图记忆/长按多选
+
+- 通知权限（问题①）：MainActivity 启动时显式请求 POST_NOTIFICATIONS（Android 13+ 此前只声明未请求，导致首次连接不弹窗、通知不显示）。
+- 视图档位记忆（问题③）：viewTier 从 GalleryScreen rememberSaveable 上移到 MainViewModel.UiState.galleryViewTier（切 Tab 保留），并持久化到 SharedPreferences（重装/重启保留）；档位切换走 model::setGalleryViewTier。
+- 长按多选（问题④第一半）：PhotoCard Card→Modifier.combinedClickable，长按任意图片进入多选并选中该图；滑动手势批量多选暂缓（实现成本高，观察需求后定）。
+- 退后台无法下载（问题②）：确认为批次 2 范围（唤醒锁 + Network 绑定），待下一批。
+- 31 项 JVM 测试全过；lintDebug + assembleDebug 通过。
+
 ## 开放问题
 
 1. 真实图库规模（120 / 300 / 更大）→ 决定 0.2 分页与批量元数据优先级。
