@@ -124,18 +124,44 @@ class DownloadQueueTest {
     }
 
     @Test
-    fun `enqueue ignores duplicates and completed tasks`() = runBlocking {
+    fun `enqueue ignores waiting duplicates`() = runBlocking {
+        val executions = AtomicInteger()
+        val release = CompletableDeferred<Unit>()
+        val started = CompletableDeferred<Unit>()
+        val queue = DownloadQueue(this, execute = { photo, _ ->
+            if (photo.handle == 1L) {
+                started.complete(Unit)
+                release.await()
+            }
+            executions.incrementAndGet()
+            "uri://${photo.filename}"
+        })
+        queue.enqueue(listOf(photo(1)))
+        started.await()
+        queue.enqueue(listOf(photo(1), photo(1)))
+        release.complete(Unit)
+        awaitStatus(queue, 1, QueueStatus.COMPLETED)
+        queue.cancelAll()
+        assertEquals(1, executions.get())
+        assertEquals(1, queue.tasks.value.size)
+    }
+
+    @Test
+    fun `re-enqueue a completed task downloads it again`() = runBlocking {
         val executions = AtomicInteger()
         val queue = DownloadQueue(this, execute = { photo, _ ->
             executions.incrementAndGet()
             "uri://${photo.filename}"
         })
-        queue.enqueue(listOf(photo(1)))
-        awaitStatus(queue, 1, QueueStatus.COMPLETED)
-        queue.enqueue(listOf(photo(1), photo(1)))
+        queue.enqueue(listOf(photo(3)))
+        awaitStatus(queue, 3, QueueStatus.COMPLETED)
+        // 用户可能删除了本地文件，重新点击下载必须再次执行
+        queue.enqueue(listOf(photo(3)))
+        awaitStatus(queue, 3, QueueStatus.COMPLETED)
         queue.cancelAll()
-        assertEquals(1, executions.get())
+        assertEquals(2, executions.get())
         assertEquals(1, queue.tasks.value.size)
+        assertEquals(QueueStatus.COMPLETED, queue.tasks.value.single().status)
     }
 
     @Test
