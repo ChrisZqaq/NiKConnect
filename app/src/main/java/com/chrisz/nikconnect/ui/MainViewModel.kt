@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.chrisz.nikconnect.camera.CameraRepository
 import com.chrisz.nikconnect.camera.PhotoDownloader
+import com.chrisz.nikconnect.camera.ConnectionKeeperService
 import com.chrisz.nikconnect.ptp.DeviceInfo
 import com.chrisz.nikconnect.ptp.PhotoObject
 import com.chrisz.nikconnect.ptp.PtpException
@@ -95,6 +96,27 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
                     _state.update {
                         it.copy(connectionStatus = ConnectionStatus.CONNECTED, deviceInfo = info, selectedTab = 0)
                     }
+                    repository.clientOrNull()?.let { client ->
+                        client.onDisconnected = {
+                            viewModelScope.launch {
+                                if (sessions.isCurrent(generation)) {
+                                    invalidateSession()
+                                    ConnectionKeeperService.stop(getApplication())
+                                    _state.update {
+                                        it.copy(
+                                            connectionStatus = ConnectionStatus.DISCONNECTED,
+                                            error = "相机连接已断开",
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    ConnectionKeeperService.start(
+                        getApplication(),
+                        title = "NiKConnect 已连接",
+                        text = "${info.manufacturer} ${info.model} 传输保持中",
+                    )
                     refreshPhotos()
                 }
                 .onFailure { error ->
@@ -231,6 +253,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         invalidateSession()
         downloadQueue.cancelAll()
         repository.close()
+        ConnectionKeeperService.stop(getApplication())
         _state.value = UiState()
     }
 
@@ -255,6 +278,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     override fun onCleared() {
         invalidateSession()
         repository.close()
+        ConnectionKeeperService.stop(getApplication())
         super.onCleared()
     }
 }

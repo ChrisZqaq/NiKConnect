@@ -53,10 +53,27 @@ class PtpIpClientLoopbackTest {
                 chunks += data
             }
             assertArrayEquals("efghij".toByteArray(), chunks.single())
+            val fired = java.util.concurrent.atomic.AtomicBoolean(false)
+            client.onDisconnected = { fired.set(true) }
             client.close()
+            assertTrue("close 后应触发 onDisconnected 回调", fired.get())
             worker.join(8_000)
             assertNull(serverError.get())
         }
+    }
+
+    @Test
+    fun `onDisconnected is not fired when client was never connected`() {
+        val client = PtpIpClient(
+            host = "127.0.0.1",
+            port = 1, // 不会连接成功
+            socketFactory = { Socket(Proxy.NO_PROXY) },
+            settleDelayMs = 0,
+        )
+        val fired = java.util.concurrent.atomic.AtomicBoolean(false)
+        client.onDisconnected = { fired.set(true) }
+        client.close()
+        assertTrue("未连接过就不应触发回调", !fired.get())
     }
 
     private fun fakeCamera(server: ServerSocket) {

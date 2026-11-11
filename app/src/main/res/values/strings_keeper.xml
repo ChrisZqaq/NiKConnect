@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="keeper_channel_name">连接保活</string>
+    <string name="keeper_default_title">NiKConnect 已连接</string>
+    <string name="keeper_default_text">相机传输保持中</string>
+</resources>
