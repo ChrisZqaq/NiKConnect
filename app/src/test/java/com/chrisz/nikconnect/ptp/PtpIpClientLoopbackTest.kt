@@ -77,6 +77,71 @@ class PtpIpClientLoopbackTest {
         assertTrue("未连接过就不应触发回调", !fired.get())
     }
 
+    @Test
+    fun `photo pages use handle offsets independent of returned photo filtering`() {
+        ServerSocket(0, 50, InetAddress.getByName("127.0.0.1")).use { server ->
+            server.soTimeout = 8_000
+            val serverError = AtomicReference<Throwable?>()
+            val worker = thread(isDaemon = true) { runCatching { fakePhotoListCamera(server) }.onFailure(serverError::set) }
+            val client = PtpIpClient(
+                host = "127.0.0.1",
+                port = server.localPort,
+                socketFactory = { Socket(Proxy.NO_PROXY) },
+                settleDelayMs = 0,
+            )
+            client.connect()
+            val first = client.listPhotos(handleOffset = 0, pageSize = 2)
+            assertEquals(3, first.first)
+            assertEquals(listOf(3L, 2L), first.second.map { it.handle })
+            assertTrue(first.third)
+            val second = client.listPhotos(handleOffset = 2, pageSize = 2)
+            assertEquals(listOf(1L), second.second.map { it.handle })
+            assertFalse(second.third)
+            client.close()
+            worker.join(8_000)
+            assertNull(serverError.get())
+        }
+    }
+
+    private fun fakePhotoListCamera(server: ServerSocket) {
+        val command = server.accept().apply { soTimeout = 8_000 }
+        readPacket(command.getInputStream())
+        val ack = LittleEndianWriter().apply {
+            u32(77); bytes(ByteArray(16)); "Fake Z f".forEach { u16(it.code) }; u16(0); u32(0x00010000)
+        }
+        writePacket(command.getOutputStream(), PacketType.INIT_COMMAND_ACK, ack.toByteArray())
+        val event = server.accept().apply { soTimeout = 8_000 }
+        val eventInit = readPacket(event.getInputStream())
+        writePacket(event.getOutputStream(), PacketType.INIT_EVENT_ACK)
+        val session = readOperation(command)
+        respond(command, session.second, ResponseCode.OK)
+        val device = readOperation(command)
+        respondWithData(command, device.second, deviceInfoDataset())
+        while (true) {
+            val op = try { readOperation(command) } catch (_: Exception) { return }
+            when (op.first) {
+                OpCode.GET_OBJECT_HANDLES -> {
+                    val handles = LittleEndianWriter().apply { u32(3); u32(1); u32(2); u32(3) }.toByteArray()
+                    respondWithData(command, op.second, handles)
+                }
+                OpCode.GET_OBJECT_INFO -> {
+                    val reader = LittleEndianReader(op.third)
+                    reader.u32(); reader.u16(); reader.u32(); val handle = reader.u32()
+                    val format = if (handle == 2L) 0x3000 else 0x3801
+                    respondWithData(command, op.second, objectInfoDataset(handle, format))
+                }
+                else -> respond(command, op.second, 0x2005)
+            }
+        }
+    }
+
+    private fun objectInfoDataset(handle: Long, format: Int): ByteArray = LittleEndianWriter().apply {
+        u32(1); u16(format); u16(0); u32(100); u16(0); u32(0)
+        repeat(5) { u32(0) }
+        u32(0); u16(0); u32(0); u32(0)
+        ptpString("IMG_$handle.JPG"); ptpString(""); ptpString(""); ptpString("")
+    }.toByteArray()
+
     private fun fakeCamera(server: ServerSocket) {
         val command = server.accept()
         command.soTimeout = 8_000

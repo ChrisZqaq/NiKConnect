@@ -103,20 +103,22 @@ internal class PtpIpClient(
 
     /**
      * 全量读取句柄列表，再分页读取对象信息（每页 [pageSize] 个，最新的在前）。
-     * 返回总句柄数、已读对象列表、是否还有下一页。每页耗时打点输出便于真机调优。
+     * 返回总句柄数、当前页对象列表、是否还有下一页。每页耗时打点输出便于真机调优。
      */
     @Synchronized
     fun listPhotos(
-        alreadyLoaded: List<PhotoObject> = emptyList(),
+        handleOffset: Int = 0,
         pageSize: Int = 60,
     ): Triple<Int, List<PhotoObject>, Boolean> {
+        require(handleOffset >= 0) { "句柄偏移不能为负数" }
+        require(pageSize > 0) { "分页大小必须大于零" }
         val handles = decodeU32Array(
             checked(transaction(OpCode.GET_OBJECT_HANDLES, listOf(0xffffffffL, 0, 0)), "读取文件列表").data,
         )
         // 相机返回旧→新，展示用最新优先
         val newestFirst = handles.asReversed()
-        val start = alreadyLoaded.size
-        if (start >= newestFirst.size) return Triple(handles.size, alreadyLoaded, false)
+        val start = handleOffset
+        if (start >= newestFirst.size) return Triple(handles.size, emptyList(), false)
         val pageHandles = newestFirst.drop(start).take(pageSize)
         val pageStart = System.currentTimeMillis()
         val page = pageHandles.map { handle ->
@@ -125,12 +127,14 @@ internal class PtpIpClient(
                 checked(transaction(OpCode.GET_OBJECT_INFO, listOf(handle)), "读取文件信息").data,
             )
         }
-        Log.i(
-            TAG,
-            "GetObjectInfo page: offset=$start size=${page.size} elapsed=${System.currentTimeMillis() - pageStart}ms",
-        )
-        val next = start + page.size
-        return Triple(handles.size, alreadyLoaded + page, next < newestFirst.size)
+        runCatching {
+            Log.i(
+                TAG,
+                "GetObjectInfo page: offset=$start size=${page.size} elapsed=${System.currentTimeMillis() - pageStart}ms",
+            )
+        }
+        val next = start + pageHandles.size
+        return Triple(handles.size, page, next < newestFirst.size)
     }
 
     @Synchronized

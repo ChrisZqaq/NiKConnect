@@ -1,14 +1,14 @@
 # NiKConnect 开发进展与问题记录
 
-最后更新：2026-11-10
+最后更新：2026-11-11
 
 > 本文件是唯一的活动进展记录。每完成一个开发/测试批次就更新；问题按"发现→分析→处置"记录。历史归档见 [docs/references/ZF_Relay_真机验证记录.md](docs/references/ZF_Relay_真机验证记录.md)。
 
 ## 当前状态
 
-- **版本**：0.1.1（真机已验收，用户 2026-11-09 确认）
+- **版本**：0.4.0-alpha（当前代码包含 RAW 导出与云创登录/方案浏览；本轮修复待真机回归）
 - **真机基线**：一加 Ace 5 Pro + Nikon Zf
-- **下一阶段**：0.2 基础导出（多选、串行队列、单任务取消、图库分页）
+- **未关闭验证**：0.4 RAW 哈希/分块对照、本轮云创登录与相机重连真机回归；真实云创 API 字段/收藏语义与机身同步闭环待验证
 
 ## 版本历史
 
@@ -17,13 +17,13 @@
 | 0.1.0 | PTP/IP 连接、最近照片、缩略图、单张 JPEG 下载 | ✅ 用户验收 | [docs/acceptance/0.1.0.md](docs/acceptance/0.1.0.md) |
 | 0.1.1 | R1–R4 修复：会话隔离、退出不阻塞、断线同步 UI、跨连接残片清理；19 项 JVM 测试 | ✅ 用户确认（2026-11-09） | [docs/acceptance/0.1.1.md](docs/acceptance/0.1.1.md) |
 
-## 2026-11-10 · 0.2 批次 1：串行下载队列（开发中）
+## 2026-11-10 · 0.2 批次 1：串行下载队列（已完成）
 
 - 新增 `ui/DownloadQueue`：`QueueStatus{WAITING,RUNNING,COMPLETED,FAILED,CANCELLED}`、`QueueTask`、`tasks: StateFlow<List<QueueTask>>`。
 - 行为：FIFO 串行（PRD D-06，一次只向相机发一个任务）；失败不阻塞后续项；单任务 cancel（等待中直接标记，执行中只取消执行体、泵存活继续下一项）；cancelAll 绑定会话结束，未完成任务标 CANCELLED 后不再接受新任务；enqueue 去重（等待/执行/完成跳过，失败/取消重置重排）。
 - 结构：pump 协程仅做通道 for 循环 + join 当前任务；每任务以 `pumpScope.launch` 子协程执行（SupervisorJob 隔离），cancel(RUNNING) 只取消子协程——避免早期版本 pump.cancel() 连带杀掉整个队列的问题。
 - 测试：`DownloadQueueTest` 10 项 JVM 测试全绿（FIFO 顺序、失败不阻塞、进度字节、取消执行中任务继续队列、取消等待任务跳过、去重、失败重试、cancelAll 停队列、onError 回调、终态保留）。全套 29 项测试通过，lintDebug + assembleDebug 通过。
-- 待办：接入 MainViewModel/TransferScreen（批次 2）。
+- 已按后续批次完成 ViewModel/TransferScreen 接入；批次 2–4 记录见下文。
 
 ## 2026-11-10 · 仓库规整（无功能改动）
 
@@ -184,7 +184,7 @@
 ## 2026-11-11 · B0 batch 2 完成：云创登录 + 方案浏览 UI（提交待查）
 
 - 新增 CloudLoginScreen：WebView 打开云创登录页，尝试从 localStorage（kc-c0004 前缀）提取 keycloak token；失败可"手动输入"粘贴 token/guid（云创 Web F12 → Local Storage 取）。
-- MainViewModel：cloudToken/cloudGuid/cloudRecipes/cloudLoading/cloudError 状态；onCloudLogin 持久化（ui_prefs/cloud_token, cloud_guid）+ 自动拉列表；cloudLogout；addRecipesToCamera 收藏回调。
+- MainViewModel：cloudToken/cloudGuid/cloudRecipes/cloudLoading/cloudError 状态；此前 token 明文保存在 ui_prefs，现改为仅内存持有，guid 可保留；自动拉列表、退出和收藏回调。
 - MainScreen：底部导航加第三 tab「云创」（Palette 图标）；CloudRecipesScreen——未登录→登录按钮；登录后网格浏览（Adaptive 96dp，多选，已选 N 项）→"收藏到相机"→addRecipesToBook→toast"相机下次连云创 Wi-Fi 时自动同步"；错误卡+重试。
 - 39 项 JVM 测试全过；lint+assemble 通过。
 - 真实 API 响应形状待用户登录后核对（parseRecipeList 三层适配，未识别形状会明确报错并显示原始片段）。
@@ -193,6 +193,14 @@
 
 - 用户反馈：云创页与相机连接绑定——未连接时看不到云创 tab；连接相机（Wi-Fi 直连、无互联网）时 WebView 打不开登录页。
 - 修复：底部导航全程显示「云创」tab（照片/传输仍需连接相机）；未连接时选云创 tab 直接进入 CloudRecipesScreen，不经过 ConnectionScreen。云创功能独立于相机连接使用（登录/浏览/收藏走手机自身网络）。
+
+## 2026-11-11 · 云创登录、队列会话与图库分页修复
+
+- CloudLoginScreen：WebView 捕获 token 后留在登录页展示，提供复制 token 与显式“返回 App”；手动输入支持填写 guid；页面退出时销毁 WebView。
+- MainViewModel：token 改为仅进程内存持有，删除旧明文偏好；guid 保留。连接切换保留云创状态，重建下载队列并取消旧队列；新队列状态重新接入 UI；销毁 ViewModel 时取消队列。
+- PtpIpClient.listPhotos 改为按已消费句柄偏移返回单页；ViewModel 基于实际句柄数推进 offset，过滤后追加可展示对象，避免格式过滤导致分页重复/遗漏。
+- 云创列表/收藏请求在凭据变化时忽略旧结果并正确传播协程取消；关闭 Android 自动备份，避免 App 数据被系统备份。
+- 验证：40 项 JVM 测试全过；`:app:lintDebug`、`:app:assembleDebug` 通过（2026-11-11）；`git diff --check` 通过。真机回归仍待执行。
 
 ## 开放问题
 

@@ -53,7 +53,7 @@ internal data class UiState(
     /** MediaStore Pictures/NiKConnect 中已存在的文件名（跨会话已下载标记）。 */
     val downloadedFilenames: Set<String> = emptySet(),
     val downloads: List<DownloadItem> = emptyList(),
-    /** 尼康云创登录态（token + 可选 guid），持久化到 ui_prefs。 */
+    /** 尼康云创登录态：token 仅驻留内存，guid 可持久化到 ui_prefs。 */
     val cloudToken: String? = null,
     val cloudGuid: String? = null,
     val cloudRecipes: List<NikonCloudClient.RecipeSummary> = emptyList(),
@@ -76,7 +76,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         UiState(
             galleryViewTier = prefs.getInt("gallery_view_tier", 0),
             lastHost = prefs.getString("last_host", null),
-            cloudToken = prefs.getString("cloud_token", null),
+            cloudToken = null,
             cloudGuid = prefs.getString("cloud_guid", null),
         ),
     )
@@ -86,7 +86,13 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     @Volatile
     private var downloader: PhotoDownloader? = null
 
-    private val downloadQueue = DownloadQueue(
+    private val _queueTasks = MutableStateFlow<List<QueueTask>>(emptyList())
+    val queueTasks: StateFlow<List<QueueTask>> = _queueTasks.asStateFlow()
+
+    @Volatile
+    private var downloadQueue = createDownloadQueue()
+
+    private fun createDownloadQueue() = DownloadQueue(
         scope = viewModelScope,
         execute = { photo, onProgress ->
             acquireWakeLock()
@@ -105,39 +111,64 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     init {
         PhotoDownloader.cleanupStalePartials(application)
         viewModelScope.launch {
-            downloadQueue.tasks.collect { tasks ->
-                _state.update { state ->
-                    state.copy(downloads = tasks.map { it.toDownloadItem() })
-                }
+            _queueTasks.collect { tasks ->
+                _state.update { state -> state.copy(downloads = tasks.map { it.toDownloadItem() }) }
             }
+        }
+        observeQueue(downloadQueue)
+    }
+
+    private var queueObserver: kotlinx.coroutines.Job? = null
+
+    private fun observeQueue(queue: DownloadQueue) {
+        queueObserver?.cancel()
+        queueObserver = viewModelScope.launch {
+            queue.tasks.collect { _queueTasks.value = it }
         }
     }
 
-    /** 云创登录完成（WebView 抓取或手动粘贴）。token 持久化并立即拉取方案列表。 */
+    private fun replaceDownloadQueue() {
+        downloadQueue.cancelAll()
+        downloadQueue = createDownloadQueue()
+        _queueTasks.value = emptyList()
+        observeQueue(downloadQueue)
+    }
+
+    /** 云创登录完成（WebView 抓取或手动粘贴）。token 不持久化，guid 可保留到本地。 */
     fun onCloudLogin(state: CloudAuthState) {
-        prefs.edit().putString("cloud_token", state.token).apply()
+        cloudRequest?.cancel()
+        prefs.edit().remove("cloud_token").apply()
         state.guid?.let { prefs.edit().putString("cloud_guid", it).apply() }
-        _state.update { it.copy(cloudToken = state.token, cloudGuid = state.guid, cloudError = null) }
+        _state.update { it.copy(cloudToken = state.token, cloudGuid = state.guid ?: it.cloudGuid, cloudError = null) }
         loadCloudRecipes()
     }
 
     fun cloudLogout() {
+        cloudRequest?.cancel()
         prefs.edit().remove("cloud_token").remove("cloud_guid").apply()
-        _state.update { it.copy(cloudToken = null, cloudGuid = null, cloudRecipes = emptyList(), cloudError = null) }
+        _state.update { it.copy(cloudToken = null, cloudGuid = null, cloudRecipes = emptyList(), cloudError = null, cloudLoading = false) }
     }
+
+    private var cloudRequest: kotlinx.coroutines.Job? = null
 
     /** 拉取云创方案列表（元数据；真实响应形状以登录后返回为准，解析失败给 UI 提示）。 */
     fun loadCloudRecipes() {
         val token = _state.value.cloudToken ?: return
         val guid = _state.value.cloudGuid ?: return
+        cloudRequest?.cancel()
         _state.update { it.copy(cloudLoading = true, cloudError = null) }
-        viewModelScope.launch {
+        cloudRequest = viewModelScope.launch {
             try {
-                val client = NikonCloudClient(accessToken = token, guid = guid)
-                val result = client.listRecipes()
-                _state.update { it.copy(cloudLoading = false, cloudRecipes = result.recipes) }
+                val result = NikonCloudClient(accessToken = token, guid = guid).listRecipes()
+                if (_state.value.cloudToken == token && _state.value.cloudGuid == guid) {
+                    _state.update { it.copy(cloudLoading = false, cloudRecipes = result.recipes) }
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _state.update { it.copy(cloudLoading = false, cloudError = e.message ?: "云创请求失败") }
+                if (_state.value.cloudToken == token && _state.value.cloudGuid == guid) {
+                    _state.update { it.copy(cloudLoading = false, cloudError = e.message ?: "云创请求失败") }
+                }
             }
         }
     }
@@ -149,9 +180,11 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         viewModelScope.launch {
             try {
                 NikonCloudClient(accessToken = token, guid = guid).addRecipesToBook(bookId = guid, recipeIds = recipeIds)
-                onResult(true, null)
+                if (_state.value.cloudToken == token && _state.value.cloudGuid == guid) onResult(true, null)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                onResult(false, e.message)
+                if (_state.value.cloudToken == token && _state.value.cloudGuid == guid) onResult(false, e.message)
             }
         }
     }
@@ -160,7 +193,22 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         if (_state.value.connectionStatus == ConnectionStatus.CONNECTING) return
         if (manualHost.isNotBlank()) prefs.edit().putString("last_host", manualHost).apply()
         val generation = invalidateSession()
-        _state.value = UiState(connectionStatus = ConnectionStatus.CONNECTING)
+        replaceDownloadQueue()
+        nextHandleOffset = 0
+        _state.update {
+            it.copy(
+                connectionStatus = ConnectionStatus.CONNECTING,
+                deviceInfo = null,
+                photos = emptyList(),
+                totalPhotoCount = 0,
+                loadingPhotos = false,
+                loadingMore = false,
+                hasMore = false,
+                error = null,
+                downloads = emptyList(),
+                downloadedFilenames = emptySet(),
+            )
+        }
         val job = viewModelScope.launch {
             runCatching { withContext(Dispatchers.IO) { repository.connect(manualHost) } }
                 .onSuccess { info ->
@@ -178,6 +226,8 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
                             viewModelScope.launch {
                                 if (sessions.isCurrent(generation)) {
                                     invalidateSession()
+                                    downloadQueue.cancelAll()
+                                    _queueTasks.value = emptyList()
                                     ConnectionKeeperService.stop(getApplication())
                                     _state.update {
                                         it.copy(
@@ -214,6 +264,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
             runCatching { withContext(Dispatchers.IO) { repository.listPhotos() } }
                 .onSuccess { (total, photos, hasMore) ->
                     if (!sessions.isCurrent(generation)) return@onSuccess
+                    nextHandleOffset = photos.size
                     _state.update {
                         it.copy(
                             loadingPhotos = false,
@@ -228,22 +279,25 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         sessions.track(generation, job)
     }
 
+    private var nextHandleOffset = 0
+
     /** 加载下一页对象信息（追加到现有列表之后）。 */
     fun loadMorePhotos() {
         val state = _state.value
         if (state.connectionStatus != ConnectionStatus.CONNECTED || state.loadingPhotos || state.loadingMore || !state.hasMore) return
         val generation = sessions.generation
-        val loaded = state.photos
+        val offset = nextHandleOffset
         val job = viewModelScope.launch {
             _state.update { it.copy(loadingMore = true, error = null) }
-            runCatching { withContext(Dispatchers.IO) { repository.listPhotos(loaded) } }
+            runCatching { withContext(Dispatchers.IO) { repository.listPhotos(offset) } }
                 .onSuccess { (total, photos, hasMore) ->
                     if (!sessions.isCurrent(generation)) return@onSuccess
+                    nextHandleOffset = offset + photos.size
                     _state.update {
                         it.copy(
                             loadingMore = false,
                             totalPhotoCount = total,
-                            photos = photos.filter { photo -> photo.isJpeg || photo.isRaw },
+                            photos = it.photos + photos.filter { photo -> photo.isJpeg || photo.isRaw },
                             hasMore = hasMore,
                         )
                     }
@@ -359,6 +413,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     fun disconnect() {
         invalidateSession()
         downloadQueue.cancelAll()
+        _queueTasks.value = emptyList()
         repository.close()
         ConnectionKeeperService.stop(getApplication())
         _state.value = UiState()
@@ -384,6 +439,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
 
     override fun onCleared() {
         invalidateSession()
+        downloadQueue.cancelAll()
         repository.close()
         ConnectionKeeperService.stop(getApplication())
         super.onCleared()

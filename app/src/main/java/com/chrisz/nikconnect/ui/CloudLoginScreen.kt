@@ -1,9 +1,9 @@
 package com.chrisz.nikconnect.ui
 
 import android.annotation.SuppressLint
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -12,7 +12,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -40,7 +39,21 @@ fun CloudLoginScreen(
     val context = LocalContext.current
     var webView by remember { mutableStateOf<WebView?>(null) }
     var manualToken by remember { mutableStateOf("") }
+    var manualGuid by remember { mutableStateOf("") }
+    var capturedToken by remember { mutableStateOf("") }
+    var capturedGuid by remember { mutableStateOf("") }
     var showManual by remember { mutableStateOf(false) }
+    var completed by remember { mutableStateOf(false) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            webView?.let { view ->
+                (view.parent as? android.view.ViewGroup)?.removeView(view)
+                view.stopLoading()
+                view.destroy()
+            }
+        }
+    }
 
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -62,22 +75,61 @@ fun CloudLoginScreen(
                 minLines = 2,
             )
             OutlinedTextField(
-                value = remember { mutableStateOf("") }.value,
-                onValueChange = {},
-                label = { Text("guid（相机注册 ID，云创 Web 我的相机页 URL 中取）") },
+                value = manualGuid,
+                onValueChange = { manualGuid = it },
+                label = { Text("相机注册 ID（guid）") },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                enabled = false,
+                singleLine = true,
             )
             Button(
-                onClick = { onDone(CloudAuthState(token = manualToken.trim(), guid = null)) },
+                onClick = {
+                    val token = manualToken.trim()
+                    if (token.isNotEmpty()) onDone(CloudAuthState(token = token, guid = manualGuid.trim().ifEmpty { null }))
+                },
+                enabled = manualToken.isNotBlank(),
                 modifier = Modifier.fillMaxWidth().padding(16.dp),
             ) { Text("使用该 token") }
         }
-        AndroidView(
+        if (capturedToken.isNotBlank()) {
+            Text("已捕获 access_token。登录页不会自动关闭，请复制令牌后返回使用。", Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+            OutlinedTextField(
+                value = capturedGuid,
+                onValueChange = { capturedGuid = it },
+                label = { Text("相机注册 ID（guid，可选）") },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = capturedToken,
+                onValueChange = {},
+                label = { Text("access_token") },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                readOnly = true,
+                minLines = 2,
+            )
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(ClipData.newPlainText("access_token", capturedToken))
+                    },
+                    modifier = Modifier.weight(1f),
+                ) { Text("复制 token") }
+                Button(
+                    onClick = {
+                        completed = true
+                        onDone(CloudAuthState(token = capturedToken, guid = capturedGuid.ifBlank { null }))
+                    },
+                    modifier = Modifier.weight(1f),
+                ) { Text("返回 App") }
+            }
+        }
+        if (capturedToken.isBlank()) AndroidView(
             factory = { ctx ->
                 WebView(ctx).apply {
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
+                    webView = this
                     webViewClient = object : WebViewClient() {
                         override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean = false
                         override fun onPageFinished(view: WebView?, url: String?) {
@@ -98,13 +150,14 @@ fun CloudLoginScreen(
                                 })()
                                 """.trimIndent(),
                             ) { value ->
-                                if (value != null && value.length > 40) {
+                                if (!completed && value != null && value.length > 40) {
                                     val t = value.trim('"').trim()
                                     if (t.contains("access_token") || t.length > 200) {
                                         // kc-c0004 存储 JSON 形如 {"access_token":"...","...}
                                         val token = extractJsonField(t, "access_token") ?: t
                                         val guid = extractJsonField(t, "guid")
-                                        onDone(CloudAuthState(token = token, guid = guid))
+                                        capturedToken = token
+                                        capturedGuid = guid.orEmpty()
                                     }
                                 }
                             }
@@ -116,7 +169,7 @@ fun CloudLoginScreen(
             modifier = Modifier.weight(1f).fillMaxWidth(),
         )
         Text(
-            "登录完成后自动回到 App。若未自动返回，用「手动输入」粘贴 token。",
+            "登录完成后复制 token，点“返回 App”继续；手动输入也可粘贴 token 并填写 guid。",
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(12.dp),
         )
