@@ -2,6 +2,7 @@ package com.chrisz.nikconnect.ui
 
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
@@ -28,6 +29,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PhotoLibrary
@@ -47,6 +49,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -65,6 +68,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -188,6 +193,17 @@ private fun ConnectionScreen(state: UiState, onConnect: (String) -> Unit) {
             }
         }
         Text("连接相机", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        if (state.lastHost != null) {
+            OutlinedButton(
+                onClick = { onConnect(state.lastHost) },
+                enabled = !connecting,
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+            ) {
+                Icon(Icons.Default.Refresh, contentDescription = null)
+                Spacer(Modifier.size(8.dp))
+                Text(if (connecting) "重连中…" else "重新连接 ${state.lastHost}")
+            }
+        }
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 ConnectionStep("1", "相机开启 Wi-Fi", "网络菜单 → 连接至智能设备 → Wi-Fi 连接")
@@ -254,6 +270,7 @@ private fun GalleryScreen(
     thumbnailLoader: suspend (Long) -> ByteArray,
 ) {
     var selectionMode by rememberSaveable { mutableStateOf(false) }
+    var viewerPhoto by remember { mutableStateOf<PhotoObject?>(null) }
     var filter by rememberSaveable { mutableStateOf("全部") }  // 全部 / JPEG / RAW
     val filteredPhotos = when (filter) {
         "JPEG" -> state.photos.filter { it.isJpeg }
@@ -353,6 +370,22 @@ private fun GalleryScreen(
                         }
                     }
                 }
+        viewerPhoto?.let { photo ->
+            PhotoViewer(
+                photo = photo,
+                thumbnailLoader = thumbnailLoader,
+                onDownload = {
+                    onDownload(photo)
+                    viewerPhoto = null
+                },
+                onSelect = {
+                    selectionMode = true
+                    selected.value = setOf(photo.handle)
+                    viewerPhoto = null
+                },
+                onDismiss = { viewerPhoto = null },
+            )
+        }
                 if (selectionMode) {
                     Surface(
                         modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
@@ -488,6 +521,66 @@ private fun RowScope.StatCard(label: String, value: String) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun PhotoViewer(
+    photo: PhotoObject,
+    thumbnailLoader: suspend (Long) -> ByteArray,
+    onDownload: () -> Unit,
+    onSelect: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val bytes by produceState<ByteArray?>(initialValue = null, photo.handle) {
+        value = runCatching { thumbnailLoader(photo.handle) }.getOrNull()
+    }
+    val bitmap = remember(bytes) {
+        bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
+    }
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(
+            color = MaterialTheme.colorScheme.background,
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(photo.filename, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "关闭") }
+                }
+                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    if (bitmap != null) {
+                        Image(
+                            bitmap = bitmap!!,
+                            contentDescription = photo.filename,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Fit,
+                        )
+                    } else {
+                        CircularProgressIndicator()
+                    }
+                }
+                Row(
+                    Modifier.fillMaxWidth().padding(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    OutlinedButton(onClick = onSelect, modifier = Modifier.weight(1f).height(52.dp)) {
+                        Text("选择此照片")
+                    }
+                    Button(
+                        onClick = onDownload,
+                        enabled = photo.isJpeg || photo.isRaw,
+                        modifier = Modifier.weight(1f).height(52.dp),
+                    ) {
+                        Text(if (photo.isJpeg || photo.isRaw) "下载这张" else "暂不支持")
+                    }
+                }
+            }
         }
     }
 }
