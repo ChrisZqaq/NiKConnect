@@ -72,7 +72,11 @@ internal class DownloadQueue(
 
     val isActive: Boolean get() = pump.isActive
 
-    /** 追加任务；已在等待/执行/完成的句柄不重复入队，失败/取消的任务重置后重新排队。 */
+    /**
+     * 追加任务；等待中/执行中的句柄不重复入队。
+     * FAILED/CANCELLED 重置后重新排队；COMPLETED 同样重置为新任务——
+     * 用户可能已删除本地文件，需要允许"重新下载"（旧记录直接被新任务覆盖）。
+     */
     fun enqueue(photos: List<PhotoObject>) {
         if (photos.isEmpty() || !pump.isActive) return
         _tasks.update { current ->
@@ -81,8 +85,8 @@ internal class DownloadQueue(
                 val existing = byHandle[photo.handle]
                 when (existing?.status) {
                     null -> list + QueueTask(photo)
-                    QueueStatus.WAITING, QueueStatus.RUNNING, QueueStatus.COMPLETED -> list
-                    QueueStatus.FAILED, QueueStatus.CANCELLED -> list.map {
+                    QueueStatus.WAITING, QueueStatus.RUNNING -> list
+                    QueueStatus.COMPLETED, QueueStatus.FAILED, QueueStatus.CANCELLED -> list.map {
                         if (it.photo.handle == photo.handle) QueueTask(photo) else it
                     }
                 }
