@@ -157,6 +157,14 @@
 - 新增 docs/acceptance/0.4.md：JPEG+NEF 哈希样本表（含手机端操作指引）、分块基线对照表、0.2 遗留补做项（JPEG 哈希+取消残片）。
 - 发现 PRD 7.4 提到 Wi-Fi Lock，代码中未实现（0.3 只做了 WakeLock+Network 绑定）——待评估是否补。
 
+## 2026-11-11 · 尼康云创色彩方案调研
+
+- 调研报告：docs/references/NIKON_CLOUD_RESEARCH.md。
+- 核心结论：尼康云创 Web 端无 NP3 直接下载端点（产品形态=收藏→发送到相机）；ZRelay 的做法是走相机端 PTP（GetPicCtrlCapability/GetPicCtrlData + SetDevicePropValueEx），不调云 API、不解析 NP3 文件。
+- NP3 格式已破解（NCP\0 魔数 TLV），有开源解析库（ssssota/nikon-flexible-color-picture-control）与 142 官方 NP3 语料（shouryan01/Nikon-Recipes）。
+- B0/B1 建议路线：相机端 PTP + NP3 本地导入导出，不走云 API。
+- 0.4 进展：用户确认"取消下载无残片"（补做项③通过）。
+
 ## 开放问题
 
 1. 真实图库规模（120 / 300 / 更大）→ 决定 0.2 分页与批量元数据优先级。
