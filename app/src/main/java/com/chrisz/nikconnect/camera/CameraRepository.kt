@@ -90,6 +90,9 @@ internal class CameraRepository(context: Context) : Closeable {
 
     fun downloader(): PhotoDownloader = PhotoDownloader(appContext, requireClient())
 
+    /** 当前连接的 client（无连接时 null）；供 ViewModel 挂断连回调。 */
+    fun clientOrNull(): PtpIpClient? = synchronized(stateLock) { client }
+
     private fun requireClient(): PtpIpClient = synchronized(stateLock) {
         client ?: throw IOException("相机已断开，请重新连接")
     }

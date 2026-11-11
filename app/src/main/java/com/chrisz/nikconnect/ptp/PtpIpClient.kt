@@ -28,7 +28,10 @@ internal class PtpIpClient(
 
     @Volatile
     internal var isConnected: Boolean = false
-        private set
+
+    /** 连接意外断开（事务失败关通道/close）时回调一次；UI 层据此停止保活服务。 */
+    @Volatile
+    var onDisconnected: (() -> Unit)? = null
 
     internal var connectionId: String = ""
         private set
@@ -238,6 +241,7 @@ internal class PtpIpClient(
     }
 
     override fun close() {
+        val wasConnected = isConnected
         val sockets = synchronized(resourceLock) {
             lifecycle += 1
             isConnected = false
@@ -248,6 +252,7 @@ internal class PtpIpClient(
         }
         runCatching { sockets.first?.close() }
         runCatching { sockets.second?.close() }
+        if (wasConnected) runCatching { onDisconnected?.invoke() }
     }
 
     private data class TransactionResult(val response: OperationResponse, val data: ByteArray)

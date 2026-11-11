@@ -88,6 +88,16 @@
 - 小档位（compact）：缩略图 1:1 撑满卡片，隐藏文件名/大小/下载按钮；多选与整卡点击下载不受影响。
 - 30 项 JVM 测试全过；lintDebug + assembleDebug 通过。
 
+## 2026-11-11 · 0.3 批次 1：前台服务保活连接（解决退后台断连）
+
+- 新增 ConnectionKeeperService（前台服务，foregroundServiceType=connectedDevice）：连接成功即启动常驻低优先级通知"NiKConnect 已连接 / 传输保持中"；disconnect()/onCleared() 停止；START_NOT_STICKY。
+- PtpIpClient 增加 onDisconnected 回调（close 时若曾连接过触发一次）：ViewModel 挂回调，意外断开时 invalidateSession + 停服务 + 状态置 DISCONNECTED 并提示"相机连接已断开"。
+- CameraRepository 新增 clientOrNull() 供挂回调。
+- 权限新增 FOREGROUND_SERVICE / FOREGROUND_SERVICE_CONNECTED_DEVICE / POST_NOTIFICATIONS（Android 13+ 通知运行时授权待真机确认；minSdk 29，API 34+ 走 connectedDevice 类型 startForeground）。
+- 新依赖 androidx.lifecycle:lifecycle-service:2.8.7；versionName 升 0.3.0-alpha（versionCode 3）。
+- 测试：新增 2 个 JVM 用例（close 后回调触发、未连接 close 不触发），31 项全过；lintDebug + assembleDebug 通过。
+- 待真机验证：退后台 >1 分钟不断连、通知显示、断连后 UI 提示。
+
 ## 开放问题
 
 1. 真实图库规模（120 / 300 / 更大）→ 决定 0.2 分页与批量元数据优先级。

@@ -1,0 +1,1227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>Nikon 相机伴侣 · 高保真交互原型</title>
+  <style>
+    /* ========== 设计令牌与基础 ========== */
+    :root {
+      --bg: #12100e;
+      --surface: #1a1714;
+      --surface-2: #221e1a;
+      --text: #e9e5dc;
+      --muted: #969087;
+      --faint: #68635c;
+      --line: #35312c;
+      --accent: #c3a36e;
+      --accent-dark: #29231b;
+      --connected: #79a88d;
+      --font-ui: "Avenir Next", "Helvetica Neue", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+      --font-mono: "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; min-height: 100%; }
+    body {
+      min-height: 100vh;
+      min-height: 100dvh;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      background: #24231f;
+      color: var(--text);
+      font-family: var(--font-ui);
+      -webkit-font-smoothing: antialiased;
+      user-select: none;
+    }
+    button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+    button:disabled { cursor: default; opacity: .38; }
+    button:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+    button:active:not(:disabled) { opacity: .72; }
+    img { display: block; max-width: 100%; }
+    .icon { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+    .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+    .muted { color: var(--muted); }
+    .prototype-stage { position: relative; width: 375px; height: 812px; flex: none; }
+    .device {
+      position: absolute;
+      inset: 0;
+      width: 375px;
+      height: 812px;
+      overflow: hidden;
+      border: 1px solid #454139;
+      border-radius: 8px;
+      background: var(--bg);
+      box-shadow: 0 28px 80px rgba(0,0,0,.46);
+      transform-origin: left top;
+    }
+    .screen { position: absolute; inset: 0; display: none; flex-direction: column; overflow: hidden; background: var(--bg); }
+    .screen.active { display: flex; }
+    .status-bar {
+      height: 28px;
+      flex: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 17px;
+      font: 600 10px/1 var(--font-mono);
+      letter-spacing: .02em;
+      color: var(--text);
+      z-index: 8;
+    }
+    .status-icons { display: flex; align-items: center; gap: 7px; }
+    .status-icons .icon { width: 14px; height: 14px; }
+    .app-header {
+      min-height: 54px;
+      flex: none;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .app-header h1 { font-size: 17px; line-height: 1.2; font-weight: 560; letter-spacing: .01em; }
+    .app-header .header-title { flex: 1; }
+    .icon-button { width: 44px; height: 44px; display: inline-grid; place-items: center; flex: none; border-radius: 4px; }
+    .text-button { min-height: 44px; padding: 0 6px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .text-button.accent-text { color: var(--accent); }
+    .section-label { color: var(--muted); font-size: 11px; letter-spacing: .12em; }
+    .primary-button, .secondary-button {
+      min-height: 48px;
+      border-radius: 5px;
+      padding: 0 16px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .primary-button { background: var(--accent); color: #211b12; }
+    .secondary-button { border: 1px solid var(--line); background: var(--surface); color: var(--text); }
+    .hairline { height: 1px; background: var(--line); }
+    .scroll-area { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
+    .scroll-area::-webkit-scrollbar, .horizontal-scroll::-webkit-scrollbar { display: none; }
+    .horizontal-scroll { scrollbar-width: none; }
+    .toast {
+      position: absolute;
+      left: 50%;
+      bottom: 102px;
+      z-index: 120;
+      max-width: 320px;
+      transform: translateX(-50%);
+      padding: 10px 14px;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: #292621;
+      color: var(--text);
+      font-size: 12px;
+      line-height: 1.5;
+      text-align: center;
+      box-shadow: 0 8px 28px rgba(0,0,0,.35);
+      display: none;
+      pointer-events: none;
+    }
+    .toast.show { display: block; }
+    .empty-state { padding: 64px 28px; text-align: center; color: var(--muted); font-size: 13px; line-height: 1.8; }
+    .empty-state .icon { width: 28px; height: 28px; margin-bottom: 12px; color: var(--faint); }
+
+    /* ========== 界面 1：连接 ========== */
+    .connection-header { padding: 19px 20px 24px; display: flex; align-items: center; gap: 13px; }
+    .brand-mark { width: 42px; height: 42px; object-fit: cover; border-radius: 4px; filter: grayscale(1) brightness(1.65); opacity: .82; }
+    .connection-title { flex: 1; }
+    .connection-title h1 { font-size: 20px; font-weight: 560; letter-spacing: .01em; }
+    .connection-state { margin-top: 7px; display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; }
+    .state-dot { width: 6px; height: 6px; border: 1px solid currentColor; border-radius: 50%; }
+    .connection-state.connected { color: var(--connected); }
+    .connection-state.connected .state-dot { background: currentColor; }
+    .connection-content { flex: 1; display: flex; flex-direction: column; padding: 0 20px 18px; }
+    .paired-label { padding: 12px 0 14px; border-top: 1px solid var(--line); }
+    .camera-list { display: grid; gap: 8px; }
+    .camera-item {
+      width: 100%;
+      min-height: 106px;
+      display: grid;
+      grid-template-columns: 102px 1fr 24px;
+      align-items: center;
+      gap: 13px;
+      padding: 12px;
+      text-align: left;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--surface);
+    }
+    .camera-item img { width: 102px; height: 72px; object-fit: cover; border-radius: 3px; background: #e7e5df; }
+    .camera-item h2 { font-size: 18px; font-weight: 560; font-family: var(--font-mono); }
+    .camera-meta { margin-top: 8px; color: var(--muted); font-size: 11px; line-height: 1.75; }
+    .camera-item .icon { color: var(--faint); width: 18px; }
+    .portfolio-entry {
+      width: 100%;
+      min-height: 64px;
+      margin-top: 20px;
+      padding: 0 4px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+    }
+    .portfolio-entry .entry-copy { flex: 1; }
+    .portfolio-entry strong { display: block; font-size: 14px; font-weight: 520; }
+    .portfolio-entry small { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
+    .portfolio-entry > .icon:last-child { width: 17px; color: var(--faint); }
+    .connection-footer { margin-top: auto; padding-top: 24px; }
+    .connection-footer .primary-button { width: 100%; }
+    .connection-note { margin-top: 12px; text-align: center; color: var(--faint); font-size: 10px; }
+    .handshake-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 60;
+      display: none;
+      flex-direction: column;
+      background: var(--bg);
+      padding: 30px 24px 22px;
+    }
+    .handshake-overlay.visible { display: flex; }
+    .handshake-head { display: flex; justify-content: space-between; align-items: center; }
+    .handshake-head .section-label { color: var(--accent); }
+    .handshake-camera { width: 100%; height: 174px; object-fit: cover; object-position: center; margin: 32px 0 26px; border-radius: 5px; filter: saturate(.7) brightness(.8); }
+    .handshake-overlay h2 { font: 500 24px/1.3 var(--font-mono); }
+    .handshake-sub { margin-top: 8px; color: var(--muted); font-size: 12px; }
+    .handshake-steps { margin-top: 36px; }
+    .handshake-step { margin-bottom: 25px; }
+    .step-copy { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 12px; }
+    .step-copy span:last-child { color: var(--muted); font-family: var(--font-mono); }
+    .step-track { height: 2px; background: var(--line); overflow: hidden; }
+    .step-fill { display: block; width: 0; height: 100%; background: var(--accent); transition: width .48s linear; }
+    .handshake-overlay.connected .step-fill { background: var(--connected); }
+    .handshake-overlay.connected .step-copy span:last-child { color: var(--connected); }
+    .handshake-footer { margin-top: auto; display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 11px; }
+    .handshake-footer .mono { color: var(--text); }
+
+    /* ========== 界面 2：主控台 Live View ========== */
+    #screen-console { background: #111; }
+    .live-photo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 52% center; filter: saturate(.82) contrast(1.06) brightness(.84); }
+    .live-photo.peaking { filter: saturate(.62) contrast(1.25) brightness(.87); }
+    .top-shade, .bottom-shade { position: absolute; left: 0; right: 0; z-index: 1; pointer-events: none; }
+    .top-shade { top: 0; height: 154px; background: linear-gradient(to bottom, rgba(12,11,10,.74), transparent); }
+    .bottom-shade { bottom: 0; height: 286px; background: linear-gradient(to top, rgba(15,14,12,.94), rgba(15,14,12,.56) 52%, transparent); }
+    .console-status { position: absolute; top: 0; left: 0; right: 0; }
+    .console-topbar { position: absolute; top: 28px; left: 0; right: 0; z-index: 5; height: 56px; display: flex; align-items: center; padding: 0 8px; }
+    .console-filter-name { flex: 1; min-height: 44px; text-align: center; font-size: 13px; text-shadow: 0 1px 6px #000; }
+    .console-filter-name small { display: block; margin-bottom: 3px; color: rgba(233,229,220,.65); font: 8px/1 var(--font-mono); letter-spacing: .16em; }
+    .console-camera-state { width: 74px; display: flex; justify-content: flex-end; align-items: center; gap: 6px; font: 10px/1 var(--font-mono); }
+    .console-camera-state .icon { width: 16px; height: 16px; }
+    .focus-frame { position: absolute; z-index: 2; left: 50%; top: 42%; width: 62px; height: 62px; transform: translate(-50%,-50%); border: 1px solid rgba(233,229,220,.52); pointer-events: none; }
+    .focus-frame::after { content: ""; position: absolute; left: 50%; top: 50%; width: 3px; height: 3px; transform: translate(-50%,-50%); background: rgba(233,229,220,.7); }
+    .tool-rail { position: absolute; z-index: 6; left: 7px; top: 206px; display: grid; gap: 5px; }
+    .tool-button { width: 42px; height: 42px; display: grid; place-items: center; color: rgba(233,229,220,.75); border-radius: 4px; background: rgba(23,22,20,.44); }
+    .tool-button.active { color: var(--accent); background: rgba(23,22,20,.8); }
+    .tool-button .icon { width: 20px; height: 20px; }
+    .grid-overlay { position: absolute; inset: 0; z-index: 2; display: none; pointer-events: none; opacity: .38; background-image: linear-gradient(to right, transparent 33.2%, #e9e5dc 33.2%, #e9e5dc 33.45%, transparent 33.45%, transparent 66.5%, #e9e5dc 66.5%, #e9e5dc 66.75%, transparent 66.75%), linear-gradient(to bottom, transparent 33.2%, #e9e5dc 33.2%, #e9e5dc 33.35%, transparent 33.35%, transparent 66.5%, #e9e5dc 66.5%, #e9e5dc 66.7%, transparent 66.7%); }
+    .grid-overlay.visible { display: block; }
+    .zebra-overlay { position: absolute; inset: 0; z-index: 2; display: none; pointer-events: none; opacity: .13; background: repeating-linear-gradient(135deg, #e9e5dc 0 2px, transparent 2px 7px); }
+    .zebra-overlay.visible { display: block; }
+    .histogram { position: absolute; z-index: 5; left: 54px; bottom: 228px; width: 118px; height: 58px; display: none; padding: 5px; background: rgba(23,22,20,.72); border: 1px solid rgba(233,229,220,.18); border-radius: 3px; }
+    .histogram.visible { display: block; }
+    .histogram svg { width: 100%; height: 100%; }
+    .console-controls { position: absolute; z-index: 7; left: 0; right: 0; bottom: 10px; padding: 0 12px; }
+    .parameter-strip { display: flex; align-items: center; justify-content: space-between; gap: 6px; height: 38px; padding: 0 2px; }
+    .parameter-button { height: 38px; padding: 0; font: 11px/1 var(--font-mono); white-space: nowrap; text-align: center; }
+    .capture-row { height: 88px; display: grid; grid-template-columns: 1fr 1.2fr 1fr; align-items: center; }
+    .capture-side { width: 48px; height: 48px; display: grid; place-items: center; justify-self: center; border-radius: 4px; }
+    .capture-side .icon { width: 25px; height: 25px; }
+    .shutter { position: relative; width: 68px; height: 68px; justify-self: center; border: 1.5px solid rgba(233,229,220,.9); border-radius: 50%; }
+    .shutter::before { content: ""; position: absolute; inset: 5px; border: 1px solid rgba(233,229,220,.55); border-radius: 50%; }
+    .shutter::after { content: ""; position: absolute; inset: 10px; border-radius: 50%; background: rgba(233,229,220,.94); }
+    .shutter.pressed::after { inset: 14px; background: var(--accent); }
+    .shutter.video::after { background: var(--accent); }
+    .mode-switch { height: 26px; display: flex; align-items: center; justify-content: center; gap: 23px; }
+    .mode-button { min-width: 40px; height: 26px; color: rgba(233,229,220,.58); font-size: 10px; }
+    .mode-button.active { color: var(--accent); }
+    .shutter-flash { position: absolute; inset: 0; z-index: 30; background: #f5f1e8; opacity: 0; pointer-events: none; }
+    .shutter-flash.firing { animation: shutterFlash .18s linear; }
+    @keyframes shutterFlash { 0% { opacity: 0; } 30% { opacity: .72; } 100% { opacity: 0; } }
+    .parameter-sheet { position: absolute; z-index: 25; left: 0; right: 0; bottom: 0; height: 188px; display: none; flex-direction: column; background: #1d1b18; border-top: 1px solid var(--line); padding: 9px 0 14px; }
+    .parameter-sheet.visible { display: flex; }
+    .sheet-heading { height: 46px; display: flex; align-items: center; padding: 0 10px 0 18px; }
+    .sheet-heading strong { flex: 1; font-size: 13px; font-weight: 520; }
+    .dial-track { flex: 1; display: flex; align-items: center; gap: 0; overflow-x: auto; overflow-y: hidden; padding: 12px 150px 18px; cursor: grab; touch-action: pan-y; scrollbar-width: none; }
+    .dial-track.dragging { cursor: grabbing; }
+    .dial-option { position: relative; flex: 0 0 58px; height: 58px; color: var(--muted); font: 13px/1 var(--font-mono); white-space: nowrap; }
+    .dial-option::after { content: ""; position: absolute; left: 50%; bottom: 0; width: 1px; height: 7px; background: var(--faint); }
+    .dial-option.selected { color: var(--accent); }
+    .dial-option.selected::after { height: 13px; background: var(--accent); }
+
+    /* ========== 界面 3：图库 ========== */
+    .gallery-tabs { height: 50px; flex: none; display: flex; padding: 0 16px; gap: 28px; border-bottom: 1px solid var(--line); }
+    .gallery-tab { position: relative; height: 50px; color: var(--muted); font-size: 13px; }
+    .gallery-tab span { margin-left: 4px; font: 10px/1 var(--font-mono); }
+    .gallery-tab.active { color: var(--text); }
+    .gallery-tab.active::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--accent); }
+    .filter-strip { height: 46px; flex: none; display: flex; align-items: center; gap: 22px; padding: 0 17px; overflow-x: auto; }
+    .filter-button { height: 44px; color: var(--muted); font-size: 11px; white-space: nowrap; }
+    .filter-button.active { color: var(--accent); }
+    .photo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; padding: 0 2px 116px; }
+    .photo-cell { position: relative; aspect-ratio: 1; overflow: hidden; background: var(--surface); border: 1px solid transparent; border-radius: 2px; touch-action: manipulation; }
+    .photo-cell img { width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+    .photo-cell.selected { border-color: var(--accent); }
+    .photo-cell.selected::after { content: ""; position: absolute; inset: 0; border: 2px solid var(--accent); pointer-events: none; }
+    .raw-badge { position: absolute; right: 4px; bottom: 4px; padding: 3px 4px; border-radius: 2px; background: rgba(23,22,20,.82); color: var(--text); font: 8px/1 var(--font-mono); letter-spacing: .04em; }
+    .video-badge { position: absolute; left: 5px; bottom: 5px; display: flex; align-items: center; gap: 3px; color: white; font: 8px/1 var(--font-mono); text-shadow: 0 1px 3px #000; }
+    .video-badge .icon { width: 11px; height: 11px; }
+    .selection-check { position: absolute; top: 5px; right: 5px; width: 17px; height: 17px; display: none; place-items: center; border: 1px solid rgba(233,229,220,.8); border-radius: 50%; background: rgba(23,22,20,.52); }
+    .selection-mode .selection-check { display: grid; }
+    .photo-cell.selected .selection-check { border-color: var(--accent); background: var(--accent); color: #211b12; }
+    .selection-check .icon { width: 11px; height: 11px; stroke-width: 2; }
+    .queue-fab { position: absolute; right: 16px; bottom: 22px; z-index: 10; width: 50px; height: 50px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 50%; background: var(--surface); box-shadow: 0 8px 22px rgba(0,0,0,.35); }
+    .queue-fab .count { position: absolute; right: -3px; top: -3px; min-width: 18px; height: 18px; padding: 0 4px; display: grid; place-items: center; border-radius: 9px; background: var(--accent); color: #211b12; font: 9px/1 var(--font-mono); }
+    .selection-bar { position: absolute; z-index: 20; left: 0; right: 0; bottom: 0; min-height: 88px; display: none; align-items: center; gap: 8px; padding: 14px 12px; border-top: 1px solid var(--line); background: var(--surface); }
+    .selection-bar.visible { display: flex; }
+    .selection-bar .primary-button { flex: 1; }
+    .selection-bar .text-button { font-size: 11px; padding: 0 5px; }
+    .photo-viewer { position: absolute; inset: 0; z-index: 45; display: none; flex-direction: column; background: var(--bg); }
+    .photo-viewer.visible { display: flex; }
+    .viewer-photo { flex: 1; min-height: 0; object-fit: cover; width: 100%; }
+    .viewer-meta { padding: 18px 20px; border-top: 1px solid var(--line); }
+    .viewer-meta h3 { font: 15px/1.3 var(--font-mono); font-weight: 500; }
+    .viewer-meta p { margin: 8px 0 16px; color: var(--muted); font: 11px/1.6 var(--font-mono); }
+    .viewer-meta .secondary-button { width: 100%; }
+
+    /* ========== 界面 4：传输队列 ========== */
+    .background-note { flex: none; padding: 10px 16px; color: var(--muted); font-size: 10px; text-align: center; border-bottom: 1px solid var(--line); }
+    .queue-summary { flex: none; padding: 20px 18px 18px; border-bottom: 1px solid var(--line); }
+    .queue-summary h2 { font-size: 21px; line-height: 1.3; font-weight: 520; }
+    .queue-metrics { display: grid; grid-template-columns: 1fr 1.2fr 1fr; gap: 8px; margin-top: 18px; }
+    .queue-metric small { display: block; margin-bottom: 6px; color: var(--muted); font-size: 9px; }
+    .queue-metric strong { font: 12px/1.2 var(--font-mono); font-weight: 500; }
+    .queue-list { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; }
+    .task-item { padding: 16px 18px 15px; border-bottom: 1px solid var(--line); }
+    .task-head { display: flex; align-items: center; gap: 10px; }
+    .task-head h3 { flex: 1; font: 12px/1.3 var(--font-mono); font-weight: 500; }
+    .task-status { color: var(--muted); font-size: 10px; }
+    .task-status.active { color: var(--accent); }
+    .task-sub { display: flex; justify-content: space-between; margin-top: 8px; color: var(--muted); font: 10px/1.2 var(--font-mono); }
+    .task-progress { height: 2px; margin-top: 12px; background: var(--line); }
+    .task-progress span { display: block; height: 100%; background: var(--accent); transition: width .55s linear; }
+    .task-item.done .task-progress span { background: var(--connected); }
+    .task-item.failed .task-progress span { background: var(--faint); }
+    .retry-button { min-height: 32px; padding: 0; color: var(--text); font-size: 10px; text-decoration: underline; text-underline-offset: 3px; }
+    .queue-actions { flex: none; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px; border-top: 1px solid var(--line); }
+    .queue-actions .secondary-button { font-size: 12px; }
+
+    /* ========== 界面 5：滤镜实验室 ========== */
+    .recipe-scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; }
+    .recipe-preview { position: relative; height: 318px; overflow: hidden; background: #111; touch-action: manipulation; }
+    .recipe-preview > img { width: 100%; height: 100%; object-fit: cover; object-position: center; }
+    .recipe-preview > img.filter-changing { animation: filterSwap .2s ease-out; }
+    @keyframes filterSwap { from { opacity: .35; } to { opacity: 1; } }
+    .compare-label { position: absolute; left: 14px; bottom: 13px; padding: 5px 7px; border: 1px solid rgba(233,229,220,.32); border-radius: 3px; background: rgba(23,22,20,.58); color: rgba(233,229,220,.82); font-size: 9px; letter-spacing: .04em; pointer-events: none; }
+    .recipe-preview.comparing .compare-label { color: var(--accent); border-color: var(--accent); }
+    .recipe-meta { padding: 17px 18px 15px; border-bottom: 1px solid var(--line); }
+    .recipe-title-row { display: flex; align-items: flex-start; gap: 12px; }
+    .recipe-title-copy { flex: 1; }
+    .recipe-title-copy h2 { font-size: 20px; font-weight: 540; }
+    .recipe-title-copy p { margin-top: 5px; color: var(--muted); font-size: 11px; }
+    .written-state { display: flex; align-items: center; gap: 6px; padding-top: 5px; color: var(--muted); font-size: 10px; white-space: nowrap; }
+    .written-dot { width: 7px; height: 7px; border: 1px solid currentColor; border-radius: 50%; }
+    .written-state.written { color: var(--accent); }
+    .written-state.written .written-dot { background: currentColor; }
+    .recipe-params { margin-top: 14px; color: var(--muted); font: 9px/1.5 var(--font-mono); letter-spacing: -.02em; }
+    .recipe-strip-label { display: flex; justify-content: space-between; padding: 15px 18px 10px; color: var(--muted); font-size: 10px; }
+    .recipe-strip-label span:last-child { font-family: var(--font-mono); }
+    .recipe-carousel { display: flex; gap: 9px; overflow-x: auto; padding: 0 18px 18px; }
+    .recipe-card { position: relative; flex: 0 0 106px; height: 121px; padding: 4px; border: 1px solid var(--line); border-radius: 5px; text-align: left; background: var(--surface); }
+    .recipe-card.selected { border-color: var(--accent); }
+    .recipe-card img { width: 96px; height: 78px; object-fit: cover; border-radius: 2px; }
+    .recipe-card strong { display: block; padding: 9px 3px 0; overflow: hidden; color: var(--text); font-size: 10px; font-weight: 500; white-space: nowrap; text-overflow: ellipsis; }
+    .recipe-card .card-dot { position: absolute; right: 9px; top: 9px; width: 8px; height: 8px; border: 1px solid rgba(233,229,220,.9); border-radius: 50%; background: rgba(23,22,20,.55); }
+    .recipe-card.written .card-dot { border-color: var(--accent); background: var(--accent); }
+    .recipe-actions { flex: none; display: grid; grid-template-columns: 1fr 1.12fr; gap: 8px; padding: 12px; border-top: 1px solid var(--line); background: var(--bg); }
+    .recipe-actions button { padding: 0 8px; font-size: 12px; }
+    .slot-panel { flex: none; display: none; border-top: 1px solid var(--line); background: #171411; }
+    .slot-panel.visible { display: block; }
+    .slot-sheet { width: 100%; padding: 6px 14px 12px; }
+    .slot-heading { height: 40px; display: flex; align-items: center; }
+    .slot-heading h2 { flex: 1; font-size: 13px; font-weight: 540; }
+    .slot-description { margin-bottom: 10px; overflow: hidden; color: var(--muted); font-size: 9px; line-height: 1.5; white-space: nowrap; text-overflow: ellipsis; }
+    .slot-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+    .slot-cell { position: relative; height: 44px; overflow: hidden; border: 1px solid var(--line); border-radius: 4px; text-align: left; padding: 5px 8px; isolation: isolate; }
+    .slot-cell::before { content: ""; position: absolute; inset: 0; z-index: -1; background: var(--accent); transform: scaleY(0); transform-origin: bottom; }
+    .slot-cell.selected { border-color: var(--accent); }
+    .slot-cell.writing::before { transform: scaleY(1); transition: transform 1.45s linear; }
+    .slot-cell.complete::before { transform: scaleY(1); }
+    .slot-cell.complete { color: #211b12; }
+    .slot-number { display: block; font: 11px/1 var(--font-mono); }
+    .slot-name { display: block; margin-top: 4px; overflow: hidden; color: var(--muted); font-size: 7.5px; white-space: nowrap; text-overflow: ellipsis; }
+    .slot-cell.complete .slot-name, .slot-cell.writing .slot-name { color: #3d311e; }
+    .write-progress-copy { min-height: 29px; padding: 9px 0 4px; color: var(--accent); font: 9px/1.5 var(--font-mono); }
+    .slot-sheet > .primary-button { width: 100%; min-height: 42px; margin-top: 2px; font-size: 12px; }
+    .phone-preview-overlay { position: absolute; inset: 0; z-index: 65; display: none; flex-direction: column; background: #111; }
+    .phone-preview-overlay.visible { display: flex; }
+    .phone-preview-overlay img { flex: 1; min-height: 0; width: 100%; object-fit: cover; }
+    .phone-preview-bar { padding: 15px 16px 20px; background: var(--bg); border-top: 1px solid var(--line); }
+    .phone-preview-bar p { margin-bottom: 12px; color: var(--muted); font: 10px/1.5 var(--font-mono); }
+    .phone-preview-bar .secondary-button { width: 100%; }
+
+    /* ========== 界面 6：作品集 ========== */
+    .year-selector { flex: none; height: 48px; display: flex; gap: 28px; padding: 0 20px; border-bottom: 1px solid var(--line); }
+    .year-button { position: relative; height: 48px; color: var(--muted); font: 12px/1 var(--font-mono); }
+    .year-button.active { color: var(--accent); }
+    .year-button.active::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--accent); }
+    .annual-stat { padding: 26px 20px 24px; border-bottom: 1px solid var(--line); }
+    .annual-stat p { color: var(--muted); font-size: 13px; }
+    .annual-number { display: flex; align-items: baseline; gap: 10px; margin-top: 8px; }
+    .annual-number strong { font: 52px/1.05 var(--font-mono); font-weight: 400; letter-spacing: -.07em; }
+    .annual-number span { color: var(--muted); font-size: 12px; }
+    .shooting-stats { padding: 4px 20px; border-bottom: 1px solid var(--line); }
+    .stat-row { min-height: 54px; display: flex; align-items: center; gap: 16px; border-bottom: 1px solid var(--line); }
+    .stat-row:last-child { border-bottom: 0; }
+    .stat-row > span { flex: none; color: var(--muted); font-size: 11px; }
+    .stat-row > strong { flex: 1; text-align: right; font: 11px/1.45 var(--font-mono); font-weight: 400; }
+    .focal-chart { padding: 20px; border-bottom: 1px solid var(--line); }
+    .focal-chart h2, .group-section h2 { margin-bottom: 16px; font-size: 13px; font-weight: 520; }
+    .bar-row { display: grid; grid-template-columns: 38px 1fr 38px; align-items: center; gap: 10px; height: 27px; font: 9px/1 var(--font-mono); }
+    .bar-row > span:first-child { color: var(--muted); }
+    .bar-row > span:last-child { text-align: right; }
+    .bar-track { height: 4px; background: var(--surface-2); }
+    .bar-fill { display: block; height: 100%; background: var(--accent); }
+    .group-section { padding: 20px 20px 30px; }
+    .group-card { width: 100%; min-height: 88px; display: flex; align-items: center; gap: 13px; padding: 12px 0; border-top: 1px solid var(--line); text-align: left; }
+    .group-card img { width: 84px; height: 64px; object-fit: cover; border-radius: 3px; }
+    .group-copy { flex: 1; }
+    .group-copy strong { display: block; font-size: 13px; font-weight: 520; }
+    .group-copy p { margin-top: 6px; color: var(--muted); font: 10px/1.5 var(--font-mono); }
+    .group-card > .icon { width: 16px; color: var(--faint); }
+    .collection-overlay { position: absolute; inset: 0; z-index: 50; display: none; flex-direction: column; background: var(--bg); }
+    .collection-overlay.visible { display: flex; }
+    .collection-meta { flex: none; padding: 14px 18px; color: var(--muted); font: 10px/1.5 var(--font-mono); border-bottom: 1px solid var(--line); }
+    .collection-overlay .scroll-area .photo-grid { padding-top: 2px; }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="prototype-stage" id="prototype-stage">
+    <main class="device" id="device" aria-label="Nikon 相机伴侣交互原型">
+      <!-- 内嵌线性图标：统一 1.5 px 描边 -->
+      <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+        <defs>
+          <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+          <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></symbol>
+          <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+          <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.2 4.2L19 7"/></symbol>
+          <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M4 9.5c4.8-4.2 11.2-4.2 16 0M7 13c3-2.6 7-2.6 10 0M10 16.3c1.2-1 2.8-1 4 0"/><circle cx="12" cy="19" r=".8" fill="currentColor" stroke="none"/></symbol>
+          <symbol id="i-battery" viewBox="0 0 24 24"><rect x="3" y="7" width="16" height="10" rx="1"/><path d="M21 10v4M6 10h8v4H6z"/></symbol>
+          <symbol id="i-album" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="1"/><circle cx="9" cy="9" r="1.5"/><path d="M5 17l5-5 3 3 2-2 4 4"/></symbol>
+          <symbol id="i-filter" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4v16M12 4a8 8 0 010 16" fill="currentColor" stroke="none"/></symbol>
+          <symbol id="i-focus" viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/><circle cx="12" cy="12" r="3"/></symbol>
+          <symbol id="i-zebra" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="1"/><path d="M4 12l8-8M4 17L17 4M7 20l13-13M12 20l8-8"/></symbol>
+          <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="1"/><path d="M9.3 4v16M14.7 4v16M4 9.3h16M4 14.7h16"/></symbol>
+          <symbol id="i-histogram" viewBox="0 0 24 24"><path d="M4 20V4M4 20h16M7 16v-3M10 16V8M13 16V5M16 16v-6M19 16v-9"/></symbol>
+          <symbol id="i-queue" viewBox="0 0 24 24"><path d="M12 4v11M8 11l4 4 4-4M5 16v4h14v-4"/></symbol>
+          <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 20h16"/></symbol>
+          <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z"/></symbol>
+          <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></symbol>
+          <symbol id="i-works" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="1"/><path d="M4 15l4-4 4 4 3-3 5 5"/></symbol>
+        </defs>
+      </svg>
+
+      <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+      <!-- ========== 界面 1：连接 ========== -->
+      <section class="screen active" id="screen-connection" aria-label="连接">
+        <div class="status-bar"><span>21:47</span><div class="status-icons"><span>5G</span><svg class="icon"><use href="#i-wifi"/></svg><svg class="icon"><use href="#i-battery"/></svg></div></div>
+        <div class="connection-header">
+          <img class="brand-mark" src="__LOGO__" alt="Nikon">
+          <div class="connection-title"><h1>Nikon 相机伴侣</h1><div class="connection-state" id="connection-state"><span class="state-dot"></span><span id="connection-state-text">未连接</span></div></div>
+        </div>
+        <div class="connection-content">
+          <div class="section-label paired-label">已配对相机</div>
+          <div class="camera-list">
+            <button class="camera-item" data-camera="Z 6III">
+              <img src="__CAMERA__" alt="Nikon Z 6III">
+              <div><h2>Z 6III</h2><div class="camera-meta"><span class="mono">82%</span> 电量<br>上次连接 · 今天 18:32</div></div>
+              <svg class="icon"><use href="#i-chevron"/></svg>
+            </button>
+            <button class="camera-item" data-camera="Z f">
+              <img src="__CAMERA__" alt="Nikon Z f" style="filter:grayscale(.8) sepia(.15)">
+              <div><h2>Z f</h2><div class="camera-meta"><span class="mono">64%</span> 电量<br>上次连接 · 10 月 08 日</div></div>
+              <svg class="icon"><use href="#i-chevron"/></svg>
+            </button>
+          </div>
+          <button class="portfolio-entry" data-go="portfolio">
+            <svg class="icon"><use href="#i-works"/></svg>
+            <span class="entry-copy"><strong>作品集</strong><small>年度拍摄统计与自动分组</small></span>
+            <svg class="icon"><use href="#i-chevron"/></svg>
+          </button>
+          <div class="connection-footer">
+            <button class="primary-button" id="scan-camera"><svg class="icon" style="width:18px"><use href="#i-wifi"/></svg>扫描新相机</button>
+            <p class="connection-note">保持相机 Wi-Fi 与 PTP/IP 服务开启</p>
+          </div>
+        </div>
+        <div class="handshake-overlay" id="handshake-overlay">
+          <div class="handshake-head"><span class="section-label">PTP/IP HANDSHAKE</span><button class="icon-button" id="cancel-connect" aria-label="取消连接"><svg class="icon"><use href="#i-close"/></svg></button></div>
+          <img class="handshake-camera" src="__CAMERA__" alt="正在连接的相机">
+          <h2 id="handshake-title">正在连接 Z 6III</h2>
+          <p class="handshake-sub" id="handshake-sub">正在建立加密通道，请保持相机唤醒</p>
+          <div class="handshake-steps">
+            <div class="handshake-step" data-step="0"><div class="step-copy"><span>建立通道</span><span>等待</span></div><div class="step-track"><span class="step-fill"></span></div></div>
+            <div class="handshake-step" data-step="1"><div class="step-copy"><span>打开会话</span><span>等待</span></div><div class="step-track"><span class="step-fill"></span></div></div>
+            <div class="handshake-step" data-step="2"><div class="step-copy"><span>读取能力</span><span>等待</span></div><div class="step-track"><span class="step-fill"></span></div></div>
+          </div>
+          <div class="handshake-footer"><span>相机直连 · 不经过云端</span><span class="mono">15740</span></div>
+        </div>
+      </section>
+
+      <!-- ========== 界面 2：主控台 Live View ========== -->
+      <section class="screen" id="screen-console" aria-label="主控台">
+        <img class="live-photo" id="live-photo" src="__LANDSCAPE__" alt="山湖实时取景画面">
+        <div class="top-shade"></div><div class="bottom-shade"></div>
+        <div class="status-bar console-status"><span>21:47</span><div class="status-icons"><span>RAW</span><svg class="icon"><use href="#i-wifi"/></svg></div></div>
+        <div class="console-topbar">
+          <button class="icon-button" data-go="connection" aria-label="返回连接页"><svg class="icon"><use href="#i-back"/></svg></button>
+          <button class="console-filter-name" data-go="recipes"><small>PICTURE CONTROL</small><span id="console-recipe-name">暖银盐 02</span></button>
+          <div class="console-camera-state"><svg class="icon"><use href="#i-battery"/></svg><span>82</span></div>
+        </div>
+        <div class="focus-frame"></div>
+        <div class="grid-overlay" id="grid-overlay"></div><div class="zebra-overlay" id="zebra-overlay"></div>
+        <div class="tool-rail">
+          <button class="tool-button" data-tool="peak" aria-label="峰值对焦" aria-pressed="false"><svg class="icon"><use href="#i-focus"/></svg></button>
+          <button class="tool-button" data-tool="zebra" aria-label="斑马纹" aria-pressed="false"><svg class="icon"><use href="#i-zebra"/></svg></button>
+          <button class="tool-button" data-tool="grid" aria-label="网格" aria-pressed="false"><svg class="icon"><use href="#i-grid"/></svg></button>
+          <button class="tool-button" data-tool="histogram" aria-label="直方图" aria-pressed="false"><svg class="icon"><use href="#i-histogram"/></svg></button>
+        </div>
+        <div class="histogram" id="histogram"><svg viewBox="0 0 110 48"><path d="M1 47H109M1 1V47" stroke="#68635c" stroke-width=".6" fill="none"/><path d="M2 45L8 43L13 41L18 36L23 38L28 29L33 22L38 26L43 14L48 8L53 18L58 11L63 24L68 20L73 31L78 28L83 38L88 35L93 42L98 39L108 45V47H2Z" fill="#c3a36e" opacity=".72"/></svg></div>
+        <div class="console-controls">
+          <div class="parameter-strip">
+            <button class="parameter-button" data-param="mode">M</button>
+            <button class="parameter-button" data-param="shutter">1/250</button>
+            <button class="parameter-button" data-param="aperture">f/2.8</button>
+            <button class="parameter-button" data-param="iso">ISO 400</button>
+            <button class="parameter-button" data-param="focal">35mm</button>
+            <button class="parameter-button" data-param="wb">WB 5600K</button>
+          </div>
+          <div class="capture-row">
+            <button class="capture-side" data-go="gallery" aria-label="打开相册"><svg class="icon"><use href="#i-album"/></svg></button>
+            <button class="shutter" id="shutter" aria-label="快门"></button>
+            <button class="capture-side" data-go="recipes" aria-label="打开滤镜实验室"><svg class="icon"><use href="#i-filter"/></svg></button>
+          </div>
+          <div class="mode-switch"><button class="mode-button active" data-capture-mode="拍照">拍照</button><button class="mode-button" data-capture-mode="录像">录像</button><button class="mode-button" data-capture-mode="B 门">B 门</button></div>
+        </div>
+        <div class="parameter-sheet" id="parameter-sheet">
+          <div class="sheet-heading"><strong id="dial-title">快门速度</strong><button class="icon-button" id="close-dial" aria-label="关闭参数拨盘"><svg class="icon"><use href="#i-close"/></svg></button></div>
+          <div class="dial-track" id="dial-track"></div>
+        </div>
+        <div class="shutter-flash" id="shutter-flash"></div>
+      </section>
+
+      <!-- ========== 界面 3：图库 ========== -->
+      <section class="screen" id="screen-gallery" aria-label="图库">
+        <div class="status-bar"><span>21:47</span><div class="status-icons"><span>5G</span><svg class="icon"><use href="#i-wifi"/></svg><svg class="icon"><use href="#i-battery"/></svg></div></div>
+        <div class="app-header"><button class="icon-button" data-go="console" aria-label="返回主控台"><svg class="icon"><use href="#i-back"/></svg></button><div class="header-title"><h1>图库</h1></div><button class="icon-button" data-go="queue" aria-label="传输队列"><svg class="icon"><use href="#i-queue"/></svg></button></div>
+        <div class="gallery-tabs"><button class="gallery-tab active" data-source="camera">相机 <span>(1,284)</span></button><button class="gallery-tab" data-source="phone">手机 <span>(327)</span></button></div>
+        <div class="filter-strip"><button class="filter-button active" data-filter="all">全部</button><button class="filter-button" data-filter="JPEG">JPEG</button><button class="filter-button" data-filter="RAW">RAW</button><button class="filter-button" data-filter="VIDEO">视频</button><button class="filter-button" data-filter="selected">已选</button></div>
+        <div class="scroll-area" id="gallery-scroll"><div class="photo-grid" id="photo-grid"></div><div class="empty-state" id="gallery-empty" hidden><svg class="icon"><use href="#i-album"/></svg><p>当前筛选下没有照片<br>长按缩略图可进入多选</p></div></div>
+        <button class="queue-fab" data-go="queue" aria-label="进入传输队列"><svg class="icon"><use href="#i-queue"/></svg><span class="count" id="queue-count">3</span></button>
+        <div class="selection-bar" id="selection-bar"><button class="text-button" id="select-all">全选</button><button class="primary-button" id="download-selected"><svg class="icon" style="width:17px"><use href="#i-download"/></svg><span>下载 0 项</span></button><button class="text-button" id="cancel-selection">取消</button></div>
+        <div class="photo-viewer" id="photo-viewer">
+          <div class="app-header"><button class="icon-button" id="close-viewer" aria-label="关闭照片"><svg class="icon"><use href="#i-close"/></svg></button><div class="header-title"><h1>照片预览</h1></div></div>
+          <img class="viewer-photo" id="viewer-photo" src="__LANDSCAPE__" alt="照片大图预览">
+          <div class="viewer-meta"><h3 id="viewer-name">DSC_0837.NEF</h3><p id="viewer-info">6048 × 4024 · ISO 400 · f/2.8 · 1/250</p><button class="secondary-button" id="viewer-select">选择此照片</button></div>
+        </div>
+      </section>
+
+      <!-- ========== 界面 4：传输队列 ========== -->
+      <section class="screen" id="screen-queue" aria-label="传输队列">
+        <div class="status-bar"><span>21:47</span><div class="status-icons"><span>5G</span><svg class="icon"><use href="#i-wifi"/></svg><svg class="icon"><use href="#i-battery"/></svg></div></div>
+        <div class="app-header"><button class="icon-button" data-go="gallery" aria-label="返回图库"><svg class="icon"><use href="#i-back"/></svg></button><div class="header-title"><h1>传输队列</h1></div></div>
+        <div class="background-note">应用切到后台仍会继续传输</div>
+        <div class="queue-summary"><h2 id="queue-headline">3 个进行中</h2><div class="queue-metrics"><div class="queue-metric"><small>总大小</small><strong id="queue-total">1.2 GB</strong></div><div class="queue-metric"><small>预计剩余</small><strong id="queue-eta">4 分 20 秒</strong></div><div class="queue-metric"><small>平均速度</small><strong id="queue-speed">8.4 MB/s</strong></div></div></div>
+        <div class="queue-list" id="queue-list"></div>
+        <div class="queue-actions"><button class="secondary-button" id="pause-all"><svg class="icon" style="width:17px"><use href="#i-pause"/></svg><span>暂停全部</span></button><button class="secondary-button" id="cancel-all">取消全部</button></div>
+      </section>
+
+      <!-- ========== 界面 5：滤镜实验室 ========== -->
+      <section class="screen" id="screen-recipes" aria-label="滤镜实验室">
+        <div class="status-bar"><span>21:47</span><div class="status-icons"><span>5G</span><svg class="icon"><use href="#i-wifi"/></svg><svg class="icon"><use href="#i-battery"/></svg></div></div>
+        <div class="app-header"><button class="icon-button" data-go="console" aria-label="返回主控台"><svg class="icon"><use href="#i-back"/></svg></button><div class="header-title"><h1>滤镜实验室</h1></div><button class="text-button" id="read-camera">从相机读取</button></div>
+        <div class="recipe-scroll">
+          <div class="recipe-preview" id="recipe-preview"><img id="recipe-preview-image" src="__LANDSCAPE__" alt="当前滤镜预览"><span class="compare-label" id="compare-label">长按查看原图</span></div>
+          <div class="recipe-meta"><div class="recipe-title-row"><div class="recipe-title-copy"><h2 id="recipe-name">暖银盐 02</h2><p id="recipe-author">Takashi Mori · Imaging Recipe</p></div><div class="written-state written" id="written-state"><span class="written-dot"></span><span>已写入相机</span></div></div><div class="recipe-params" id="recipe-params">QUICK SHARP −1 · CONTRAST +2 · SATURATION −1</div></div>
+          <div class="recipe-strip-label"><span>云创滤镜</span><span id="recipe-position">01 / 06</span></div>
+          <div class="recipe-carousel horizontal-scroll" id="recipe-carousel"></div>
+        </div>
+        <div class="slot-panel" id="slot-panel">
+          <div class="slot-sheet"><div class="slot-heading"><h2>选择相机槽位</h2><button class="icon-button" id="close-slots" aria-label="收起槽位选择"><svg class="icon"><use href="#i-close"/></svg></button></div><p class="slot-description">「<span id="slot-recipe-name">暖银盐 02</span>」写入 Z 6III · 写入后自动读回校验</p><div class="slot-grid" id="slot-grid"></div><div class="write-progress-copy" id="write-progress-copy">选择一个槽位开始写入</div><button class="primary-button" id="confirm-write" disabled>写入所选槽位</button></div>
+        </div>
+        <div class="recipe-actions"><button class="secondary-button" id="phone-preview">在手机上预览</button><button class="primary-button" id="write-recipe">写入相机</button></div>
+        <div class="phone-preview-overlay" id="phone-preview-overlay"><div class="app-header"><div class="header-title"><h1 id="phone-preview-name">暖银盐 02</h1></div><button class="icon-button" id="close-phone-preview" aria-label="关闭手机预览"><svg class="icon"><use href="#i-close"/></svg></button></div><img id="phone-preview-image" src="__LANDSCAPE__" alt="手机滤镜实时预览"><div class="phone-preview-bar"><p>DEVICE PREVIEW · REAL-TIME RENDER</p><button class="secondary-button" id="finish-phone-preview">完成预览</button></div></div>
+      </section>
+
+      <!-- ========== 界面 6：作品集 ========== -->
+      <section class="screen" id="screen-portfolio" aria-label="作品集">
+        <div class="status-bar"><span>21:47</span><div class="status-icons"><span>5G</span><svg class="icon"><use href="#i-wifi"/></svg><svg class="icon"><use href="#i-battery"/></svg></div></div>
+        <div class="app-header"><button class="icon-button" data-go="connection" aria-label="返回连接页"><svg class="icon"><use href="#i-back"/></svg></button><div class="header-title"><h1>作品集</h1></div></div>
+        <div class="year-selector"><button class="year-button" data-year="2024">2024</button><button class="year-button" data-year="2025">2025</button><button class="year-button active" data-year="2026">2026</button></div>
+        <div class="scroll-area">
+          <div class="annual-stat"><p><span id="annual-year">2026</span> 年你拍了</p><div class="annual-number"><strong id="annual-count">12,847</strong><span>张</span></div></div>
+          <div class="shooting-stats"><div class="stat-row"><span>最常用机身</span><strong id="stat-body">Z 6III · 8,421 张</strong></div><div class="stat-row"><span>最常用镜头</span><strong id="stat-lens">NIKKOR Z 24-70mm f/2.8 S · 5,102 张</strong></div><div class="stat-row"><span>焦段偏好</span><strong id="stat-focal">35mm（31%）</strong></div></div>
+          <div class="focal-chart"><h2>焦段分布</h2><div id="focal-bars"></div></div>
+          <div class="group-section"><h2>自动分组</h2><div id="group-list"></div></div>
+        </div>
+        <div class="collection-overlay" id="collection-overlay"><div class="status-bar"><span>21:47</span><div class="status-icons"><span>5G</span><svg class="icon"><use href="#i-wifi"/></svg></div></div><div class="app-header"><button class="icon-button" id="close-collection" aria-label="返回作品集"><svg class="icon"><use href="#i-back"/></svg></button><div class="header-title"><h1 id="collection-title">10月12日 · 外滩</h1></div></div><div class="collection-meta" id="collection-meta">47 张 · 2 小时 18 分 · Z 6III</div><div class="scroll-area"><div class="photo-grid" id="collection-grid"></div></div></div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    "use strict";
+
+    /* ========== 通用导航与反馈 ========== */
+    const $ = (selector, root = document) => root.querySelector(selector);
+    const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+    let currentScreen = "connection";
+    let toastTimer;
+
+    function showToast(message) {
+      const toast = $("#toast");
+      toast.textContent = message;
+      toast.classList.add("show");
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove("show"), 2100);
+    }
+
+    function navigate(name) {
+      $$(".screen").forEach(screen => screen.classList.toggle("active", screen.id === `screen-${name}`));
+      currentScreen = name;
+      $("#parameter-sheet").classList.remove("visible");
+      if (name === "gallery") renderGallery();
+      if (name === "queue") renderQueue();
+      if (name === "recipes") renderRecipe();
+      if (name === "portfolio") renderPortfolio();
+    }
+
+    document.addEventListener("click", event => {
+      const route = event.target.closest("[data-go]");
+      if (route) navigate(route.dataset.go);
+    });
+
+    function fitDevice() {
+      const scale = Math.min(1, (window.innerWidth - 16) / 375, (window.innerHeight - 16) / 812);
+      const stage = $("#prototype-stage");
+      stage.style.width = `${375 * scale}px`;
+      stage.style.height = `${812 * scale}px`;
+      $("#device").style.transform = `scale(${scale})`;
+    }
+    window.addEventListener("resize", fitDevice);
+    fitDevice();
+
+    /* ========== 界面 1：PTP 握手 ========== */
+    let connectionRun = 0;
+    let connectedCamera = "";
+
+    function beginConnection(camera) {
+      const run = ++connectionRun;
+      const overlay = $("#handshake-overlay");
+      overlay.classList.remove("connected");
+      overlay.classList.add("visible");
+      $("#handshake-title").textContent = `正在连接 ${camera}`;
+      $("#handshake-sub").textContent = "正在建立通道，请保持相机唤醒";
+      const steps = $$(".handshake-step");
+      steps.forEach(step => {
+        step.classList.remove("complete");
+        $(".step-fill", step).style.width = "0";
+        $(".step-copy span:last-child", step).textContent = "等待";
+      });
+      steps.forEach((step, index) => {
+        setTimeout(() => {
+          if (run !== connectionRun) return;
+          $(".step-copy span:last-child", step).textContent = "进行中";
+          $(".step-fill", step).style.width = "100%";
+        }, index * 720);
+        setTimeout(() => {
+          if (run !== connectionRun) return;
+          step.classList.add("complete");
+          $(".step-copy span:last-child", step).textContent = "完成";
+          if (index === 2) {
+            overlay.classList.add("connected");
+            connectedCamera = camera;
+            $("#handshake-sub").textContent = `已连接 ${camera} · 会话就绪`;
+            const state = $("#connection-state");
+            state.classList.add("connected");
+            $("#connection-state-text").textContent = `已连接 ${camera}`;
+            setTimeout(() => {
+              if (run !== connectionRun) return;
+              overlay.classList.remove("visible");
+              navigate("console");
+              showToast(`${camera} 已就绪`);
+            }, 650);
+          }
+        }, index * 720 + 560);
+      });
+    }
+
+    $$("[data-camera]").forEach(button => button.addEventListener("click", () => beginConnection(button.dataset.camera)));
+    $("#scan-camera").addEventListener("click", () => {
+      showToast("发现 Z 6III · 信号强度良好");
+      beginConnection("Z 6III");
+    });
+    $("#cancel-connect").addEventListener("click", () => {
+      connectionRun++;
+      $("#handshake-overlay").classList.remove("visible");
+      showToast("已取消连接");
+    });
+
+    /* ========== 界面 2：取景工具、参数拨盘与快门 ========== */
+    const toolState = { peak: false, zebra: false, grid: false, histogram: false };
+    $$("[data-tool]").forEach(button => button.addEventListener("click", () => {
+      const tool = button.dataset.tool;
+      toolState[tool] = !toolState[tool];
+      button.classList.toggle("active", toolState[tool]);
+      button.setAttribute("aria-pressed", String(toolState[tool]));
+      if (tool === "peak") $("#live-photo").classList.toggle("peaking", toolState[tool]);
+      if (tool === "zebra") $("#zebra-overlay").classList.toggle("visible", toolState[tool]);
+      if (tool === "grid") $("#grid-overlay").classList.toggle("visible", toolState[tool]);
+      if (tool === "histogram") $("#histogram").classList.toggle("visible", toolState[tool]);
+    }));
+
+    const parameters = {
+      mode: { title: "拍摄模式", value: "M", values: ["M", "A", "S", "P", "AUTO"] },
+      shutter: { title: "快门速度", value: "1/250", values: ["1/60", "1/125", "1/250", "1/500", "1/1000", "1/2000"] },
+      aperture: { title: "光圈", value: "f/2.8", values: ["f/1.4", "f/2", "f/2.8", "f/4", "f/5.6", "f/8", "f/11"] },
+      iso: { title: "感光度", value: "ISO 400", values: ["ISO 100", "ISO 200", "ISO 400", "ISO 800", "ISO 1600", "ISO 3200", "ISO 6400"] },
+      focal: { title: "焦距", value: "35mm", values: ["14mm", "24mm", "35mm", "50mm", "70mm", "85mm", "135mm", "200mm"] },
+      wb: { title: "白平衡", value: "WB 5600K", values: ["WB 3200K", "WB 4300K", "WB 5600K", "WB 6500K", "WB 7500K"] }
+    };
+    let activeParameter = "shutter";
+    let dialMoved = false;
+
+    function renderParameters() {
+      $$("[data-param]").forEach(button => button.textContent = parameters[button.dataset.param].value);
+    }
+
+    function centerDialOption(button) {
+      const track = $("#dial-track");
+      track.scrollTo({ left: button.offsetLeft - (track.clientWidth - button.clientWidth) / 2, behavior: "auto" });
+    }
+
+    function setParameterValue(value, center = false) {
+      parameters[activeParameter].value = value;
+      renderParameters();
+      $$(".dial-option").forEach(option => {
+        const selected = option.dataset.value === value;
+        option.classList.toggle("selected", selected);
+        if (selected && center) centerDialOption(option);
+      });
+    }
+
+    function openDial(key) {
+      activeParameter = key;
+      $("#dial-title").textContent = parameters[key].title;
+      const track = $("#dial-track");
+      track.innerHTML = parameters[key].values.map(value => `<button class="dial-option ${value === parameters[key].value ? "selected" : ""}" data-value="${value}">${value}</button>`).join("");
+      $("#parameter-sheet").classList.add("visible");
+      requestAnimationFrame(() => {
+        const selected = $(".dial-option.selected", track);
+        if (selected) centerDialOption(selected);
+      });
+    }
+
+    $$("[data-param]").forEach(button => button.addEventListener("click", () => openDial(button.dataset.param)));
+    $("#close-dial").addEventListener("click", () => $("#parameter-sheet").classList.remove("visible"));
+    $("#dial-track").addEventListener("click", event => {
+      const option = event.target.closest(".dial-option");
+      if (!option || dialMoved) return;
+      setParameterValue(option.dataset.value, true);
+    });
+
+    const dialTrack = $("#dial-track");
+    let dialStartX = 0;
+    let dialStartScroll = 0;
+    let dialDragging = false;
+    dialTrack.addEventListener("pointerdown", event => {
+      dialDragging = true;
+      dialMoved = false;
+      dialStartX = event.clientX;
+      dialStartScroll = dialTrack.scrollLeft;
+      dialTrack.setPointerCapture(event.pointerId);
+      dialTrack.classList.add("dragging");
+    });
+    dialTrack.addEventListener("pointermove", event => {
+      if (!dialDragging) return;
+      const distance = event.clientX - dialStartX;
+      if (Math.abs(distance) > 5) dialMoved = true;
+      dialTrack.scrollLeft = dialStartScroll - distance;
+    });
+    function finishDial(event) {
+      if (!dialDragging) return;
+      dialDragging = false;
+      dialTrack.classList.remove("dragging");
+      if (dialTrack.hasPointerCapture(event.pointerId)) dialTrack.releasePointerCapture(event.pointerId);
+      const center = dialTrack.scrollLeft + dialTrack.clientWidth / 2;
+      const nearest = $$(".dial-option", dialTrack).reduce((best, option) => {
+        const distance = Math.abs(option.offsetLeft + option.clientWidth / 2 - center);
+        return !best || distance < best.distance ? { option, distance } : best;
+      }, null);
+      if (nearest) setParameterValue(nearest.option.dataset.value, true);
+      setTimeout(() => { dialMoved = false; }, 0);
+    }
+    dialTrack.addEventListener("pointerup", finishDial);
+    dialTrack.addEventListener("pointercancel", finishDial);
+
+    let shotNumber = 843;
+    let captureMode = "拍照";
+    $$("[data-capture-mode]").forEach(button => button.addEventListener("click", () => {
+      captureMode = button.dataset.captureMode;
+      $$("[data-capture-mode]").forEach(item => item.classList.toggle("active", item === button));
+      $("#shutter").classList.toggle("video", captureMode === "录像");
+      showToast(`已切换至${captureMode}`);
+    }));
+    $("#shutter").addEventListener("click", () => {
+      const shutter = $("#shutter");
+      const flash = $("#shutter-flash");
+      shutter.classList.add("pressed");
+      flash.classList.remove("firing");
+      void flash.offsetWidth;
+      flash.classList.add("firing");
+      setTimeout(() => { shutter.classList.remove("pressed"); flash.classList.remove("firing"); }, 190);
+      shotNumber++;
+      showToast(captureMode === "录像" ? "已开始录制 · 00:00:01" : captureMode === "B 门" ? "B 门曝光已开始" : `已拍摄 DSC_${String(shotNumber).padStart(4, "0")}.NEF`);
+    });
+
+    /* ========== 界面 3：图库、多选与照片预览 ========== */
+    const photoFilters = ["saturate(.8) contrast(1.05)", "sepia(.2) saturate(.8)", "grayscale(.8) contrast(1.15)", "saturate(.65) brightness(.8)", "hue-rotate(-12deg) saturate(.7)", "contrast(1.18) brightness(.9)"];
+    const cameraPhotos = Array.from({ length: 12 }, (_, index) => ({
+      id: `camera-${index}`,
+      name: `DSC_${String(837 + index).padStart(4, "0")}.${index % 4 === 3 ? "JPG" : index === 10 ? "MOV" : "NEF"}`,
+      type: index === 10 ? "VIDEO" : index % 4 === 3 ? "JPEG" : "RAW",
+      size: index === 10 ? 428.6 : index % 4 === 3 ? 14.8 : 48.2 + index * .7,
+      filter: photoFilters[index % photoFilters.length],
+      position: `${38 + (index % 4) * 8}% center`
+    }));
+    const phonePhotos = Array.from({ length: 12 }, (_, index) => ({
+      id: `phone-${index}`,
+      name: `NKC_${String(1120 + index)}.${index === 8 ? "MOV" : "JPG"}`,
+      type: index === 8 ? "VIDEO" : index % 5 === 0 ? "RAW" : "JPEG",
+      size: index === 8 ? 182.4 : index % 5 === 0 ? 45.6 : 9.8 + index * .4,
+      filter: photoFilters[(index + 2) % photoFilters.length],
+      position: `${34 + (index % 5) * 7}% center`
+    }));
+    let gallerySource = "camera";
+    let galleryFilter = "all";
+    let selectionMode = false;
+    const selectedPhotos = new Set();
+    let longPressTimer;
+    let longPressAt = 0;
+    let viewerPhotoId = "";
+
+    function currentPhotos() { return gallerySource === "camera" ? cameraPhotos : phonePhotos; }
+    function filteredPhotos() {
+      if (galleryFilter === "all") return currentPhotos();
+      if (galleryFilter === "selected") return currentPhotos().filter(photo => selectedPhotos.has(photo.id));
+      return currentPhotos().filter(photo => photo.type === galleryFilter);
+    }
+
+    function renderGallery() {
+      const photos = filteredPhotos();
+      const grid = $("#photo-grid");
+      grid.classList.toggle("selection-mode", selectionMode);
+      grid.innerHTML = photos.map(photo => `<button class="photo-cell ${selectedPhotos.has(photo.id) ? "selected" : ""}" data-photo-id="${photo.id}" aria-label="${photo.name}"><img src="__LANDSCAPE__" alt="" style="filter:${photo.filter};object-position:${photo.position}"><span class="selection-check"><svg class="icon"><use href="#i-check"/></svg></span>${photo.type === "RAW" ? '<span class="raw-badge">RAW</span>' : ""}${photo.type === "VIDEO" ? '<span class="video-badge"><svg class="icon"><use href="#i-play"/></svg>00:18</span>' : ""}</button>`).join("");
+      $("#gallery-empty").hidden = photos.length > 0;
+      $("#selection-bar").classList.toggle("visible", selectionMode);
+      $(".queue-fab").style.display = selectionMode ? "none" : "grid";
+      $("#download-selected span").textContent = `下载 ${selectedPhotos.size} 项`;
+      $("#download-selected").disabled = selectedPhotos.size === 0;
+      bindPhotoGestures();
+      updateQueueCount();
+    }
+
+    function togglePhotoSelection(id) {
+      if (selectedPhotos.has(id)) selectedPhotos.delete(id); else selectedPhotos.add(id);
+      if (!selectionMode) selectionMode = true;
+      renderGallery();
+    }
+
+    function openPhotoViewer(photo) {
+      viewerPhotoId = photo.id;
+      $("#viewer-name").textContent = photo.name;
+      $("#viewer-info").textContent = `${photo.type === "VIDEO" ? "3840 × 2160 · 00:18" : "6048 × 4024"} · ISO 400 · f/2.8 · 1/250`;
+      const image = $("#viewer-photo");
+      image.style.filter = photo.filter;
+      image.style.objectPosition = photo.position;
+      $("#viewer-select").textContent = selectedPhotos.has(photo.id) ? "取消选择此照片" : "选择此照片";
+      $("#photo-viewer").classList.add("visible");
+    }
+
+    function bindPhotoGestures() {
+      $$(".photo-cell", $("#photo-grid")).forEach(cell => {
+        cell.addEventListener("pointerdown", event => {
+          if (event.button !== 0) return;
+          clearTimeout(longPressTimer);
+          longPressTimer = setTimeout(() => {
+            longPressAt = Date.now();
+            selectionMode = true;
+            togglePhotoSelection(cell.dataset.photoId);
+            if (navigator.vibrate) navigator.vibrate(12);
+          }, 480);
+        });
+        ["pointerup", "pointercancel", "pointerleave"].forEach(type => cell.addEventListener(type, () => clearTimeout(longPressTimer)));
+        cell.addEventListener("click", () => {
+          if (Date.now() - longPressAt < 650) return;
+          const photo = currentPhotos().find(item => item.id === cell.dataset.photoId);
+          if (selectionMode || galleryFilter === "selected") togglePhotoSelection(photo.id); else openPhotoViewer(photo);
+        });
+        cell.addEventListener("contextmenu", event => event.preventDefault());
+      });
+    }
+
+    $$("[data-source]").forEach(button => button.addEventListener("click", () => {
+      gallerySource = button.dataset.source;
+      $$("[data-source]").forEach(item => item.classList.toggle("active", item === button));
+      galleryFilter = "all";
+      selectionMode = false;
+      $$("[data-filter]").forEach(item => item.classList.toggle("active", item.dataset.filter === "all"));
+      renderGallery();
+    }));
+    $$("[data-filter]").forEach(button => button.addEventListener("click", () => {
+      galleryFilter = button.dataset.filter;
+      if (galleryFilter === "selected") selectionMode = true;
+      $$("[data-filter]").forEach(item => item.classList.toggle("active", item === button));
+      renderGallery();
+    }));
+    $("#select-all").addEventListener("click", () => {
+      filteredPhotos().forEach(photo => selectedPhotos.add(photo.id));
+      renderGallery();
+    });
+    $("#cancel-selection").addEventListener("click", () => {
+      selectionMode = false;
+      selectedPhotos.clear();
+      galleryFilter = "all";
+      $$("[data-filter]").forEach(item => item.classList.toggle("active", item.dataset.filter === "all"));
+      renderGallery();
+    });
+    $("#close-viewer").addEventListener("click", () => $("#photo-viewer").classList.remove("visible"));
+    $("#viewer-select").addEventListener("click", () => {
+      togglePhotoSelection(viewerPhotoId);
+      $("#photo-viewer").classList.remove("visible");
+    });
+
+    /* ========== 界面 4：真实走动的后台传输队列 ========== */
+    let tasks = [
+      { id: 1, name: "DSC_0837.NEF", size: 54.2, progress: 36, status: "active", speed: 2.9 },
+      { id: 2, name: "DSC_0838.NEF", size: 51.8, progress: 68, status: "active", speed: 2.8 },
+      { id: 3, name: "DSC_0842.MOV", size: 824.0, progress: 14, status: "active", speed: 2.7 },
+      { id: 4, name: "DSC_0843.NEF", size: 49.6, progress: 0, status: "waiting", speed: 0 },
+      { id: 5, name: "DSC_0829.JPG", size: 16.4, progress: 100, status: "done", speed: 0 },
+      { id: 6, name: "DSC_0831.NEF", size: 244.0, progress: 42, status: "failed", speed: 0 }
+    ];
+    let queuePaused = false;
+    let queueTouched = false;
+    let nextTaskId = 7;
+
+    function updateQueueCount() {
+      const count = tasks.filter(task => task.status === "active" || task.status === "waiting").length;
+      $("#queue-count").textContent = count;
+      $("#queue-count").style.display = count ? "grid" : "none";
+    }
+
+    function taskStatus(task) {
+      if (task.status === "active" && queuePaused) return "已暂停";
+      return { active: "传输中", waiting: "等待中", done: "已完成", failed: "失败" }[task.status];
+    }
+
+    function formatSize(size) { return size >= 1000 ? `${(size / 1024).toFixed(1)} GB` : `${size.toFixed(1)} MB`; }
+    function formatETA(seconds) {
+      if (!Number.isFinite(seconds) || seconds <= 0) return "—";
+      const minutes = Math.floor(seconds / 60);
+      const remain = Math.round(seconds % 60);
+      return minutes ? `${minutes} 分 ${String(remain).padStart(2, "0")} 秒` : `${remain} 秒`;
+    }
+
+    function renderQueue() {
+      const active = tasks.filter(task => task.status === "active");
+      const pending = tasks.filter(task => task.status === "active" || task.status === "waiting");
+      const total = tasks.reduce((sum, task) => sum + task.size, 0);
+      const remaining = pending.reduce((sum, task) => sum + task.size * (1 - task.progress / 100), 0);
+      const speed = queuePaused ? 0 : active.reduce((sum, task) => sum + task.speed, 0);
+      $("#queue-headline").textContent = pending.length ? `${pending.length} 个进行中` : tasks.length ? "没有进行中的任务" : "队列已清空";
+      if (queueTouched) {
+        $("#queue-total").textContent = formatSize(total);
+        $("#queue-eta").textContent = formatETA(remaining / (speed || 1));
+        $("#queue-speed").textContent = `${speed.toFixed(1)} MB/s`;
+      }
+      $("#queue-list").innerHTML = tasks.length ? tasks.map(task => `<article class="task-item ${task.status}"><div class="task-head"><h3>${task.name}</h3>${task.status === "failed" ? `<button class="retry-button" data-retry="${task.id}">重试</button>` : `<span class="task-status ${task.status === "active" && !queuePaused ? "active" : ""}">${taskStatus(task)}</span>`}</div><div class="task-sub"><span>${formatSize(task.size)}</span><span>${task.status === "active" && !queuePaused ? `${task.speed.toFixed(1)} MB/s` : `${Math.round(task.progress)}%`}</span></div><div class="task-progress"><span style="width:${task.progress}%"></span></div></article>`).join("") : '<div class="empty-state"><svg class="icon"><use href="#i-queue"/></svg><p>没有传输任务<br>返回图库选择照片开始下载</p></div>';
+      $("#pause-all span").textContent = queuePaused ? "继续全部" : "暂停全部";
+      $("#pause-all").disabled = !active.length;
+      $("#cancel-all").disabled = !tasks.length;
+      updateQueueCount();
+    }
+
+    function updateQueue() {
+      let changed = false;
+      tasks.forEach(task => {
+        if (task.status !== "active" || queuePaused) return;
+        queueTouched = true;
+        changed = true;
+        if (!task.baseSpeed) task.baseSpeed = task.speed;
+        const jitter = 1 + (Math.random() * 2 - 1) * .08;
+        task.speed = task.baseSpeed * jitter;
+        task.progress = Math.min(100, task.progress + .45 + Math.random() * .85);
+        if (task.progress >= 100) {
+          task.status = "done";
+          task.speed = 0;
+          const waiting = tasks.find(item => item.status === "waiting");
+          if (waiting) { waiting.status = "active"; waiting.speed = 2.6 + Math.random() * .5; }
+        }
+      });
+      if (changed && currentScreen === "queue") renderQueue();
+      if (changed) updateQueueCount();
+    }
+    setInterval(updateQueue, 700);
+
+    $("#queue-list").addEventListener("click", event => {
+      const retry = event.target.closest("[data-retry]");
+      if (!retry) return;
+      const task = tasks.find(item => item.id === Number(retry.dataset.retry));
+      task.status = tasks.filter(item => item.status === "active").length < 3 ? "active" : "waiting";
+      task.speed = task.status === "active" ? 2.7 : 0;
+      queuePaused = false;
+      queueTouched = true;
+      renderQueue();
+      showToast(`${task.name} 已重新加入队列`);
+    });
+    $("#pause-all").addEventListener("click", () => {
+      queuePaused = !queuePaused;
+      queueTouched = true;
+      renderQueue();
+      showToast(queuePaused ? "已暂停全部传输" : "传输已继续");
+    });
+    $("#cancel-all").addEventListener("click", () => {
+      tasks = [];
+      queuePaused = false;
+      queueTouched = true;
+      renderQueue();
+      showToast("已清空传输队列");
+    });
+    $("#download-selected").addEventListener("click", () => {
+      if (!selectedPhotos.size) return;
+      const chosen = currentPhotos().filter(photo => selectedPhotos.has(photo.id));
+      const activeCount = tasks.filter(task => task.status === "active").length;
+      const newTasks = chosen.map((photo, index) => ({
+        id: nextTaskId++, name: photo.name, size: photo.size, progress: 0,
+        status: index + activeCount < 3 ? "active" : "waiting", speed: index + activeCount < 3 ? 2.5 + Math.random() : 0
+      }));
+      tasks = [...newTasks, ...tasks];
+      selectedPhotos.clear();
+      selectionMode = false;
+      galleryFilter = "all";
+      queuePaused = false;
+      queueTouched = true;
+      navigate("queue");
+      showToast(`已加入 ${newTasks.length} 项，后台继续传输`);
+    });
+
+    /* ========== 界面 5：滤镜预览与 201–209 槽位写入 ========== */
+    const landscapeSource = "__LANDSCAPE__";
+    const recipes = [
+      { name: "暖银盐 02", author: "Takashi Mori", filter: "sepia(.18) saturate(.78) contrast(1.08) brightness(.96)", written: true, slot: 201, params: "QUICK SHARP −1 · CONTRAST +2 · SATURATION −1" },
+      { name: "静夜 Pro", author: "Lin Zhao", filter: "saturate(.58) contrast(1.16) brightness(.78) hue-rotate(8deg)", written: true, slot: 202, params: "SHARPENING +1 · CONTRAST +3 · HIGHLIGHT −2" },
+      { name: "Soft Amber", author: "Mika Studio", filter: "sepia(.32) saturate(.72) contrast(.94) brightness(1.05)", written: false, slot: null, params: "CLARITY −2 · CONTRAST −1 · SATURATION −1" },
+      { name: "Forest Cine", author: "North Field", filter: "saturate(.68) hue-rotate(-13deg) contrast(1.12) brightness(.9)", written: false, slot: null, params: "HUE −2 · CONTRAST +2 · SHADOW −1" },
+      { name: "Mono 400", author: "Atelier N", filter: "grayscale(1) contrast(1.22) brightness(.94)", written: false, slot: null, params: "MONOCHROME · GRAIN MEDIUM · CONTRAST +2" },
+      { name: "Daylight 5600", author: "Nikon Recipe", filter: "saturate(.9) contrast(1.03) brightness(1.03)", written: false, slot: null, params: "WB 5600K · CONTRAST 0 · SATURATION 0" }
+    ];
+    let selectedRecipe = 0;
+    let previewTimer;
+    let showingOriginal = false;
+    let selectedSlot = 204;
+    let writing = false;
+
+    function renderRecipe(animate = false) {
+      const recipe = recipes[selectedRecipe];
+      const image = $("#recipe-preview-image");
+      image.style.filter = recipe.filter;
+      if (animate) {
+        image.classList.remove("filter-changing");
+        void image.offsetWidth;
+        image.classList.add("filter-changing");
+      }
+      $("#recipe-name").textContent = recipe.name;
+      $("#recipe-author").textContent = `${recipe.author} · Imaging Recipe`;
+      $("#recipe-params").textContent = recipe.params;
+      $("#console-recipe-name").textContent = recipe.name;
+      $("#recipe-position").textContent = `${String(selectedRecipe + 1).padStart(2, "0")} / ${String(recipes.length).padStart(2, "0")}`;
+      const state = $("#written-state");
+      state.classList.toggle("written", recipe.written);
+      $("span:last-child", state).textContent = recipe.written ? `已写入相机${recipe.slot ? ` · ${recipe.slot}` : ""}` : "未写入相机";
+      $("#recipe-carousel").innerHTML = recipes.map((item, index) => `<button class="recipe-card ${index === selectedRecipe ? "selected" : ""} ${item.written ? "written" : ""}" data-recipe="${index}"><img src="${landscapeSource}" alt="${item.name}" style="filter:${item.filter}"><span class="card-dot"></span><strong>${item.name}</strong></button>`).join("");
+    }
+
+    $("#recipe-carousel").addEventListener("click", event => {
+      const card = event.target.closest("[data-recipe]");
+      if (!card) return;
+      selectedRecipe = Number(card.dataset.recipe);
+      renderRecipe(true);
+    });
+
+    function restoreRecipePreview() {
+      clearTimeout(previewTimer);
+      if (showingOriginal) {
+        showingOriginal = false;
+        $("#recipe-preview-image").style.filter = recipes[selectedRecipe].filter;
+        $("#recipe-preview").classList.remove("comparing");
+        $("#compare-label").textContent = "长按查看原图";
+      }
+    }
+    $("#recipe-preview").addEventListener("pointerdown", () => {
+      clearTimeout(previewTimer);
+      previewTimer = setTimeout(() => {
+        showingOriginal = true;
+        $("#recipe-preview-image").style.filter = "none";
+        $("#recipe-preview").classList.add("comparing");
+        $("#compare-label").textContent = "原图 · 松手恢复";
+      }, 260);
+    });
+    ["pointerup", "pointercancel", "pointerleave"].forEach(type => $("#recipe-preview").addEventListener(type, restoreRecipePreview));
+    $("#recipe-preview").addEventListener("contextmenu", event => event.preventDefault());
+
+    $("#phone-preview").addEventListener("click", () => {
+      const recipe = recipes[selectedRecipe];
+      $("#phone-preview-name").textContent = recipe.name;
+      $("#phone-preview-image").style.filter = recipe.filter;
+      $("#phone-preview-overlay").classList.add("visible");
+    });
+    ["#close-phone-preview", "#finish-phone-preview"].forEach(selector => $(selector).addEventListener("click", () => $("#phone-preview-overlay").classList.remove("visible")));
+
+    function renderSlots() {
+      const occupied = new Map(recipes.filter(recipe => recipe.written && recipe.slot).map(recipe => [recipe.slot, recipe.name]));
+      $("#slot-grid").innerHTML = Array.from({ length: 9 }, (_, index) => {
+        const slot = 201 + index;
+        return `<button class="slot-cell ${slot === selectedSlot ? "selected" : ""}" data-slot="${slot}" ${writing ? "disabled" : ""}><span class="slot-number">${slot}</span><span class="slot-name">${occupied.get(slot) || "空槽位"}</span></button>`;
+      }).join("");
+      $("#slot-recipe-name").textContent = recipes[selectedRecipe].name;
+      $("#confirm-write").textContent = `写入 ${selectedSlot}`;
+      $("#confirm-write").disabled = writing;
+    }
+
+    function closeSlotPanel() {
+      if (writing) return;
+      $("#slot-panel").classList.remove("visible");
+      $("#write-recipe").textContent = "写入相机";
+    }
+
+    $("#write-recipe").addEventListener("click", () => {
+      const panel = $("#slot-panel");
+      if (panel.classList.contains("visible")) {
+        closeSlotPanel();
+        return;
+      }
+      writing = false;
+      selectedSlot = recipes[selectedRecipe].slot || 204;
+      $("#write-progress-copy").textContent = "选择一个槽位开始写入";
+      panel.classList.add("visible");
+      $("#write-recipe").textContent = "收起槽位";
+      renderSlots();
+    });
+    $("#close-slots").addEventListener("click", closeSlotPanel);
+    $("#slot-grid").addEventListener("click", event => {
+      const cell = event.target.closest("[data-slot]");
+      if (!cell || writing) return;
+      selectedSlot = Number(cell.dataset.slot);
+      renderSlots();
+    });
+    $("#confirm-write").addEventListener("click", () => {
+      if (writing) return;
+      writing = true;
+      renderSlots();
+      const cell = $(`[data-slot="${selectedSlot}"]`);
+      cell.classList.add("writing");
+      $("#confirm-write").textContent = "正在写入";
+      $("#write-progress-copy").textContent = "01 / 03 · 读取当前槽位与备份信息";
+      setTimeout(() => { if (writing) $("#write-progress-copy").textContent = "02 / 03 · 写入 Picture Control 数据"; }, 520);
+      setTimeout(() => { if (writing) $("#write-progress-copy").textContent = "03 / 03 · 读回校验"; }, 1060);
+      setTimeout(() => {
+        if (!writing) return;
+        recipes.forEach(recipe => { if (recipe.slot === selectedSlot) { recipe.slot = null; recipe.written = false; } });
+        const recipe = recipes[selectedRecipe];
+        recipe.written = true;
+        recipe.slot = selectedSlot;
+        cell.classList.remove("writing");
+        cell.classList.add("complete");
+        $(".slot-name", cell).textContent = recipe.name;
+        $("#write-progress-copy").textContent = `写入完成 · 槽位 ${selectedSlot} 已校验`;
+        $("#confirm-write").textContent = "完成";
+        $("#confirm-write").disabled = true;
+        writing = false;
+        renderRecipe();
+        showToast(`${recipe.name} 已写入槽位 ${selectedSlot}`);
+      }, 1580);
+    });
+    $("#read-camera").addEventListener("click", () => {
+      const button = $("#read-camera");
+      button.disabled = true;
+      button.textContent = "读取中…";
+      setTimeout(() => {
+        recipes[2].written = true;
+        recipes[2].slot = 203;
+        renderRecipe();
+        button.disabled = false;
+        button.textContent = "从相机读取";
+        showToast("已从相机读取 3 个滤镜 · 槽位 201–203");
+      }, 900);
+    });
+
+    /* ========== 界面 6：年度作品统计与自动分组 ========== */
+    const portfolioData = {
+      2024: { count: "9,863", body: "Z f · 5,734 张", lens: "NIKKOR Z 40mm f/2 · 3,846 张", focal: "40mm（39%）", bars: [8, 14, 25, 39, 8, 4, 2] },
+      2025: { count: "19,204", body: "Z 6III · 12,762 张", lens: "NIKKOR Z 24-70mm f/2.8 S · 8,309 张", focal: "50mm（29%）", bars: [5, 18, 24, 29, 14, 7, 3] },
+      2026: { count: "12,847", body: "Z 6III · 8,421 张", lens: "NIKKOR Z 24-70mm f/2.8 S · 5,102 张", focal: "35mm（31%）", bars: [6, 17, 31, 22, 13, 7, 4] }
+    };
+    const focalLabels = ["14", "24", "35", "50", "85", "135", "200+"];
+    let activeYear = 2026;
+    const groups = [
+      { date: "10月12日", place: "外滩", count: 47, duration: "2 小时 18 分" },
+      { date: "09月28日", place: "莫干山", count: 126, duration: "4 小时 06 分" },
+      { date: "08月03日", place: "阿那亚", count: 83, duration: "1 小时 52 分" }
+    ];
+
+    function renderPortfolio() {
+      const data = portfolioData[activeYear];
+      $("#annual-year").textContent = activeYear;
+      $("#annual-count").textContent = data.count;
+      $("#stat-body").textContent = data.body;
+      $("#stat-lens").textContent = data.lens;
+      $("#stat-focal").textContent = data.focal;
+      $("#focal-bars").innerHTML = data.bars.map((value, index) => `<div class="bar-row"><span>${focalLabels[index]}</span><div class="bar-track"><span class="bar-fill" style="width:${value / 40 * 100}%"></span></div><span>${value}%</span></div>`).join("");
+      $("#group-list").innerHTML = groups.map((group, index) => `<button class="group-card" data-group="${index}"><img src="__LANDSCAPE__" alt="${group.place}" style="filter:${photoFilters[index]};object-position:${40 + index * 12}% center"><span class="group-copy"><strong>${group.date} · ${group.place}</strong><p>${group.count} 张 · ${group.duration}</p></span><svg class="icon"><use href="#i-chevron"/></svg></button>`).join("");
+    }
+
+    $$("[data-year]").forEach(button => button.addEventListener("click", () => {
+      activeYear = Number(button.dataset.year);
+      $$("[data-year]").forEach(item => item.classList.toggle("active", item === button));
+      renderPortfolio();
+    }));
+    $("#group-list").addEventListener("click", event => {
+      const button = event.target.closest("[data-group]");
+      if (!button) return;
+      const group = groups[Number(button.dataset.group)];
+      $("#collection-title").textContent = `${group.date} · ${group.place}`;
+      $("#collection-meta").textContent = `${group.count} 张 · ${group.duration} · Z 6III`;
+      $("#collection-grid").innerHTML = cameraPhotos.map(photo => `<div class="photo-cell"><img src="__LANDSCAPE__" alt="${group.place}作品" style="filter:${photo.filter};object-position:${photo.position}">${photo.type === "RAW" ? '<span class="raw-badge">RAW</span>' : ""}</div>`).join("");
+      $("#collection-overlay").classList.add("visible");
+    });
+    $("#close-collection").addEventListener("click", () => $("#collection-overlay").classList.remove("visible"));
+
+    /* ========== 初始状态 ========== */
+    renderParameters();
+    renderGallery();
+    renderQueue();
+    renderRecipe();
+    renderPortfolio();
+  </script>
+</body>
+</html>
