@@ -142,8 +142,8 @@ private fun NiKConnectContent(
             )
         },
         bottomBar = {
-            if (connected) {
-                NavigationBar {
+            NavigationBar {
+                if (connected) {
                     NavigationBarItem(
                         selected = state.selectedTab == 0,
                         onClick = { onTab(0) },
@@ -156,19 +156,21 @@ private fun NiKConnectContent(
                         icon = { Icon(Icons.Default.Download, contentDescription = null) },
                         label = { Text("传输") },
                     )
-                    NavigationBarItem(
-                        selected = state.selectedTab == 2,
-                        onClick = { onTab(2) },
-                        icon = { Icon(Icons.Default.Palette, contentDescription = null) },
-                        label = { Text("云创") },
-                    )
                 }
+                NavigationBarItem(
+                    selected = state.selectedTab == 2,
+                    onClick = { onTab(2) },
+                    icon = { Icon(Icons.Default.Palette, contentDescription = null) },
+                    label = { Text("云创") },
+                )
             }
         },
     ) { padding ->
         Box(modifier = Modifier.padding(padding).fillMaxSize()) {
-            if (!connected) {
+            if (!connected && state.selectedTab != 2) {
                 ConnectionScreen(state, onConnect)
+            } else if (!connected && state.selectedTab == 2) {
+                CloudRecipesScreen(state, onCloudLogin, onCloudLogout, onLoadCloudRecipes, onAddRecipesToCamera)
             } else if (state.selectedTab == 0) {
                 GalleryScreen(state, onDownload, onDownloadAll, onLoadMore, onViewTier, thumbnailLoader)
             } else if (state.selectedTab == 1) {
