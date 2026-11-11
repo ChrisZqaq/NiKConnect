@@ -331,6 +331,10 @@ private fun GalleryScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
+                    val completedHandles = state.downloads
+                        .filter { it.status == DownloadStatus.COMPLETED }
+                        .map { it.photo.handle }
+                        .toSet()
                     items(filteredPhotos, key = { it.handle }) { photo ->
                         val onToggle: ((Long) -> Unit)? = if (selectionMode) {
                             { handle: Long ->
@@ -346,10 +350,14 @@ private fun GalleryScreen(
                         PhotoCard(
                             photo = photo,
                             compact = viewTier == 2,
+                            downloaded = photo.handle in completedHandles,
                             selectionMode = selectionMode,
                             isSelected = photo.handle in selected.value,
                             onToggleSelect = onToggle,
                             onDownload = onDownload,
+                            onOpen = if (!selectionMode && (photo.isJpeg || photo.isRaw)) {
+                                { viewerPhoto = photo }
+                            } else null,
                             onLongPress = if (!selectionMode && state.photos.isNotEmpty()) {
                                 { selectionMode = true; selected.value = setOf(photo.handle) }
                             } else null,
@@ -373,6 +381,10 @@ private fun GalleryScreen(
         viewerPhoto?.let { photo ->
             PhotoViewer(
                 photo = photo,
+                downloaded = photo.handle in state.downloads
+                    .filter { it.status == DownloadStatus.COMPLETED }
+                    .map { it.photo.handle }
+                    .toSet(),
                 thumbnailLoader = thumbnailLoader,
                 onDownload = {
                     onDownload(photo)
@@ -430,10 +442,12 @@ private fun GalleryScreen(
 private fun PhotoCard(
     photo: PhotoObject,
     compact: Boolean,
+    downloaded: Boolean,
     selectionMode: Boolean,
     isSelected: Boolean,
     onToggleSelect: ((Long) -> Unit)?,
     onDownload: (PhotoObject) -> Unit,
+    onOpen: (() -> Unit)?,
     onLongPress: (() -> Unit)?,
     thumbnailLoader: suspend (Long) -> ByteArray,
 ) {
@@ -455,7 +469,7 @@ private fun PhotoCard(
             onClick = {
                 when {
                     selectionMode && onToggleSelect != null -> onToggleSelect(photo.handle)
-                    !selectionMode && (photo.isJpeg || photo.isRaw) -> onDownload(photo)
+                    !selectionMode && onOpen != null -> onOpen()
                 }
             },
             onLongClick = { onLongPress?.invoke() },
@@ -475,6 +489,14 @@ private fun PhotoCard(
                     )
                 } else {
                     Text(if (photo.isRaw) "NEF" else "JPEG", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (downloaded) {
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = "已下载",
+                        modifier = Modifier.align(Alignment.BottomStart).padding(6.dp),
+                        tint = MaterialTheme.colorScheme.secondary,
+                    )
                 }
                 if (selectionMode) {
                     Icon(
@@ -528,6 +550,7 @@ private fun RowScope.StatCard(label: String, value: String) {
 @Composable
 private fun PhotoViewer(
     photo: PhotoObject,
+    downloaded: Boolean,
     thumbnailLoader: suspend (Long) -> ByteArray,
     onDownload: () -> Unit,
     onSelect: () -> Unit,
@@ -574,10 +597,10 @@ private fun PhotoViewer(
                     }
                     Button(
                         onClick = onDownload,
-                        enabled = photo.isJpeg || photo.isRaw,
+                        enabled = !downloaded && (photo.isJpeg || photo.isRaw),
                         modifier = Modifier.weight(1f).height(52.dp),
                     ) {
-                        Text(if (photo.isJpeg || photo.isRaw) "下载这张" else "暂不支持")
+                        Text(if (downloaded) "已下载" else if (photo.isJpeg || photo.isRaw) "下载这张" else "暂不支持")
                     }
                 }
             }
