@@ -173,6 +173,14 @@
 - 测试：LoopbackTest 增 3 用例（探针成功带数据预览/失败记 0x2005/属性码参数下发），fakeProbeCamera 假相机按 opcode 映射应答。全套测试通过。
 - 真机待验：opcode 实际值（0x9028/0x9201 是候选）、云创推送触发方式（相机连云创 Wi-Fi vs 主动命令）。
 
+## 2026-11-11 · B0 batch 2：云创 API 客户端（JVM 层）
+
+- 用户拍板简化模型：App 只做云创方案浏览+收藏（替换相机注册列表），传输由相机↔云创完成（相机连家庭路由 Wi-Fi 自动同步，外部文档已确认该机制，单 Wi-Fi 冲突坑不存在）；云创列表需登录态。
+- 新增 cloud/NikonCloudClient.kt：accessToken+guid 构造；listRecipes（POST /bff/recipe，header access_token）、addRecipesToBook（POST /publicrecipe/{guid}，Bearer）、listCameras（GET /camera/{guid}）；parseRecipeList 形状适配（recipes/data.recipes/result.recipes 三层包裹候选，id/recipeId、name/recipeName/title 字段兼容——真实形状待登录后核对）。
+- 依赖：kotlinx-serialization-json 1.7.3 + 序列化插件 2.0.21。
+- 新增 5 个 JVM 测试（形状解析/未知形状/非法 JSON/缺 id 跳过），全套 39 项 0 失败；lint+assemble 通过。
+- 待做：登录态接入（WebView 抓 token）、云创浏览 UI、探针入口（真机 opcode）。
+
 ## 开放问题
 
 1. 真实图库规模（120 / 300 / 更大）→ 决定 0.2 分页与批量元数据优先级。

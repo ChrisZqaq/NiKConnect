@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.kotlin.plugin.serialization") version "2.0.21"
 }
 
 android {
@@ -25,6 +26,10 @@ android {
 
     buildFeatures {
         compose = true
+    }
+
+    dependencies {
+        implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     }
 
     compileOptions {
