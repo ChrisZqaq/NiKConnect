@@ -5,18 +5,21 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-private val NikonYellow = Color(0xFFFFCD00)
+// 设计令牌取自 nikon-companion-prototype.html（深色摄影器材风）
+private val AccentGold = Color(0xFFC3A36E)
+private val ConnectedGreen = Color(0xFF79A88D)
 private val Scheme = darkColorScheme(
-    primary = NikonYellow,
-    onPrimary = Color(0xFF171814),
-    secondary = Color(0xFFD7D5C9),
-    background = Color(0xFF111210),
-    surface = Color(0xFF171814),
-    surfaceVariant = Color(0xFF23241F),
-    onBackground = Color(0xFFF3F1E8),
-    onSurface = Color(0xFFF3F1E8),
-    onSurfaceVariant = Color(0xFFAEAFA5),
-    error = Color(0xFFFFB4AB),
+    primary = AccentGold,
+    onPrimary = Color(0xFF12100E),
+    secondary = ConnectedGreen,
+    background = Color(0xFF12100E),
+    surface = Color(0xFF1A1714),
+    surfaceVariant = Color(0xFF221E1A),
+    outline = Color(0xFF35312C),
+    onBackground = Color(0xFFE9E5DC),
+    onSurface = Color(0xFFE9E5DC),
+    onSurfaceVariant = Color(0xFF969087),
+    error = Color(0xFFE29A8A),
 )
 
 @Composable
