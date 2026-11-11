@@ -113,6 +113,15 @@
 - 网络侧无需改动：socket 在批次 4 已绑定 camera Network（network::newSocket），路由不漂移。
 - 31 项 JVM 测试全过；lintDebug + assembleDebug 通过。
 
+## 2026-11-11 · UI 重整批次 1：对齐 nikon-companion-prototype.html
+
+- 主题：设计令牌换为原型深色摄影器材风——主色金棕 #C3A36E、连接绿 #79A88D、bg #12100E、surface #1A1714/#221E1A、文本 #E9E5DC/#969087、描边 #35312C。
+- 连接页品牌化：NP 徽标 + "NIKCONNECT / PTP/IP 直连传图" 头部。
+- 图库：全部/JPEG/RAW FilterChip 筛选条（rememberSaveable，作用视图与全选/批量下载）；多选改底部选择栏（全选/取消/下载所选 N 项，底部 Surface 常驻），顶栏只留视图切换按钮；长按进入多选保留。
+- 传输页：新增统计头（传输中/已完成/失败 三张指标卡）。
+- 31 项 JVM 测试全过；lintDebug + assembleDebug 通过。
+- 原型中超出 0.x 范围未做：console 实时取景、recipes 滤镜、portfolio 统计、单图查看器（下一批）。
+
 ## 开放问题
 
 1. 真实图库规模（120 / 300 / 更大）→ 决定 0.2 分页与批量元数据优先级。

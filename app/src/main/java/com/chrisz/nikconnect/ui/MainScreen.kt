@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -38,6 +39,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -163,12 +165,29 @@ private fun ConnectionScreen(state: UiState, onConnect: (String) -> Unit) {
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "连接相机",
-            style = MaterialTheme.typography.headlineLarge,
-            fontWeight = FontWeight.Black,
-        )
+        Spacer(Modifier.height(16.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                color = MaterialTheme.colorScheme.primary,
+            ) {
+                Text(
+                    "NP",
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    fontWeight = FontWeight.Black,
+                )
+            }
+            Column {
+                Text("NIKCONNECT", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black)
+                Text(
+                    "PTP/IP 直连传图",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Text("连接相机", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 ConnectionStep("1", "相机开启 Wi-Fi", "网络菜单 → 连接至智能设备 → Wi-Fi 连接")
@@ -235,6 +254,12 @@ private fun GalleryScreen(
     thumbnailLoader: suspend (Long) -> ByteArray,
 ) {
     var selectionMode by rememberSaveable { mutableStateOf(false) }
+    var filter by rememberSaveable { mutableStateOf("全部") }  // 全部 / JPEG / RAW
+    val filteredPhotos = when (filter) {
+        "JPEG" -> state.photos.filter { it.isJpeg }
+        "RAW" -> state.photos.filter { it.isRaw }
+        else -> state.photos
+    }
     val viewTier = state.galleryViewTier
     val viewMinSize = listOf(168.dp, 96.dp, 64.dp)[viewTier]
     val selected = rememberSaveable(state.photos.map { it.handle }) {
@@ -246,29 +271,26 @@ private fun GalleryScreen(
     }
     Column(Modifier.fillMaxSize()) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                if (selectionMode) "已选 ${selected.value.size} 项" else "照片",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-            )
-            if (state.photos.isNotEmpty()) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = {
-                        onViewTier((viewTier + 1) % VIEW_TIERS.size)
-                    }) {
-                        Icon(Icons.Default.GridView, contentDescription = "切换视图大小")
-                        Spacer(Modifier.width(4.dp))
-                        Text(VIEW_TIERS[viewTier])
-                    }
-                    TextButton(onClick = {
-                        if (selectionMode) exitSelection() else selectionMode = true
-                    }) {
-                        Text(if (selectionMode) "取消" else "多选")
-                    }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("全部", "JPEG", "RAW").forEach { tier ->
+                    FilterChip(
+                        selected = filter == tier,
+                        onClick = { filter = tier },
+                        label = { Text(tier) },
+                    )
+                }
+            }
+            if (filteredPhotos.isNotEmpty()) {
+                TextButton(onClick = {
+                    onViewTier((viewTier + 1) % VIEW_TIERS.size)
+                }) {
+                    Icon(Icons.Default.GridView, contentDescription = "切换视图大小")
+                    Spacer(Modifier.width(4.dp))
+                    Text(VIEW_TIERS[viewTier])
                 }
             }
         }
@@ -287,12 +309,12 @@ private fun GalleryScreen(
             else -> Box(Modifier.fillMaxSize()) {
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = viewMinSize),
-                    contentPadding = PaddingValues(16.dp),
+                    contentPadding = PaddingValues(16.dp, if (selectionMode) 16.dp else 16.dp, 16.dp, if (selectionMode) 96.dp else 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
-                    items(state.photos, key = { it.handle }) { photo ->
+                    items(filteredPhotos, key = { it.handle }) { photo ->
                         val onToggle: ((Long) -> Unit)? = if (selectionMode) {
                             { handle: Long ->
                                 selected.value = if (handle in selected.value) {
@@ -457,11 +479,38 @@ private fun PhotoCard(
 }
 
 @Composable
+private fun RowScope.StatCard(label: String, value: String) {
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.weight(1f),
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
 private fun TransferScreen(
     state: UiState,
     onRetry: (Long) -> Unit,
     onCancel: (Long) -> Unit,
 ) {
+    if (state.downloads.isNotEmpty()) {
+        val done = state.downloads.count { it.status == DownloadStatus.COMPLETED }
+        val failed = state.downloads.count { it.status == DownloadStatus.FAILED }
+        val active = state.downloads.count { it.status == DownloadStatus.WAITING || it.status == DownloadStatus.DOWNLOADING }
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            StatCard("传输中", active.toString())
+            StatCard("已完成", done.toString())
+            StatCard("失败", failed.toString())
+        }
+    }
     if (state.downloads.isEmpty()) {
         Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
             Text("暂无传输", color = MaterialTheme.colorScheme.onSurfaceVariant)
