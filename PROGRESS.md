@@ -69,6 +69,12 @@
 - 测试拆分：原 `enqueue ignores duplicates and completed tasks` 改为 `enqueue ignores waiting duplicates`（执行中重复点击去重），新增 `re-enqueue a completed task downloads it again`（重新下载执行两次、记录仍为 1 条）。
 - 30 项 JVM 测试全过；lintDebug + assembleDebug 通过。
 
+## 2026-11-11 · 真机反馈修复：已完成任务可重新下载
+
+- 真机验收发现：删除本地图片后无法重新下载同一张——根因是 DownloadQueue.enqueue 把 COMPLETED 也当作"去重跳过"。
+- 修复：enqueue 去重只跳过 WAITING/RUNNING；COMPLETED/FAILED/CANCELLED 一律重置 QueueTask 重新入队（旧记录被新任务覆盖）。
+- 测试：原"忽略重复与已完成"用例拆为"忽略等待中重复"（gate 控制执行时机）+ 新增"重新入队已完成任务会再次下载"。30 项 JVM 测试全过；lintDebug + assembleDebug 通过。
+
 ## 开放问题
 
 1. 真实图库规模（120 / 300 / 更大）→ 决定 0.2 分页与批量元数据优先级。
