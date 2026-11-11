@@ -106,6 +106,13 @@
 - 退后台无法下载（问题②）：确认为批次 2 范围（唤醒锁 + Network 绑定），待下一批。
 - 31 项 JVM 测试全过；lintDebug + assembleDebug 通过。
 
+## 2026-11-11 · 0.3 批次 2：唤醒锁（退后台/锁屏下载不中断）
+
+- WAKE_LOCK 权限；MainViewModel 持 PARTIAL_WAKE_LOCK（"NiKConnect:download"，30 分钟超时防泄漏）。
+- 下载队列 execute 每任务开始 acquire，finally 检查队列无 WAITING/RUNNING 后释放——批量下载/锁屏期间 CPU 不休眠。
+- 网络侧无需改动：socket 在批次 4 已绑定 camera Network（network::newSocket），路由不漂移。
+- 31 项 JVM 测试全过；lintDebug + assembleDebug 通过。
+
 ## 开放问题
 
 1. 真实图库规模（120 / 300 / 更大）→ 决定 0.2 分页与批量元数据优先级。
