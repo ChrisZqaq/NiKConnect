@@ -181,6 +181,14 @@
 - 新增 5 个 JVM 测试（形状解析/未知形状/非法 JSON/缺 id 跳过），全套 39 项 0 失败；lint+assemble 通过。
 - 待做：登录态接入（WebView 抓 token）、云创浏览 UI、探针入口（真机 opcode）。
 
+## 2026-11-11 · B0 batch 2 完成：云创登录 + 方案浏览 UI（提交待查）
+
+- 新增 CloudLoginScreen：WebView 打开云创登录页，尝试从 localStorage（kc-c0004 前缀）提取 keycloak token；失败可"手动输入"粘贴 token/guid（云创 Web F12 → Local Storage 取）。
+- MainViewModel：cloudToken/cloudGuid/cloudRecipes/cloudLoading/cloudError 状态；onCloudLogin 持久化（ui_prefs/cloud_token, cloud_guid）+ 自动拉列表；cloudLogout；addRecipesToCamera 收藏回调。
+- MainScreen：底部导航加第三 tab「云创」（Palette 图标）；CloudRecipesScreen——未登录→登录按钮；登录后网格浏览（Adaptive 96dp，多选，已选 N 项）→"收藏到相机"→addRecipesToBook→toast"相机下次连云创 Wi-Fi 时自动同步"；错误卡+重试。
+- 39 项 JVM 测试全过；lint+assemble 通过。
+- 真实 API 响应形状待用户登录后核对（parseRecipeList 三层适配，未识别形状会明确报错并显示原始片段）。
+
 ## 开放问题
 
 1. 真实图库规模（120 / 300 / 更大）→ 决定 0.2 分页与批量元数据优先级。
