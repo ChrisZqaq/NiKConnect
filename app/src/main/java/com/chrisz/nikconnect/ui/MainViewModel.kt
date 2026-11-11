@@ -2,6 +2,7 @@ package com.chrisz.nikconnect.ui
 
 import android.app.Application
 import android.content.Context
+import android.provider.MediaStore
 import android.os.PowerManager
 import android.util.LruCache
 import androidx.lifecycle.AndroidViewModel
@@ -48,6 +49,8 @@ internal data class UiState(
     val selectedTab: Int = 0,
     val galleryViewTier: Int = 0,
     val lastHost: String? = null,
+    /** MediaStore Pictures/NiKConnect 中已存在的文件名（跨会话已下载标记）。 */
+    val downloadedFilenames: Set<String> = emptySet(),
     val downloads: List<DownloadItem> = emptyList(),
 ) {
     val downloading: Boolean get() = downloads.any { it.status == DownloadStatus.DOWNLOADING }
@@ -111,8 +114,12 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
                 .onSuccess { info ->
                     if (!sessions.isCurrent(generation)) return@onSuccess
                     downloader = repository.downloader()
+                    val downloaded = queryDownloadedFilenames()
                     _state.update {
-                        it.copy(connectionStatus = ConnectionStatus.CONNECTED, deviceInfo = info, selectedTab = 0, error = null)
+                        it.copy(
+                            connectionStatus = ConnectionStatus.CONNECTED, deviceInfo = info,
+                            selectedTab = 0, error = null, downloadedFilenames = downloaded,
+                        )
                     }
                     repository.clientOrNull()?.let { client ->
                         client.onDisconnected = {
@@ -275,6 +282,21 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun selectTab(index: Int) = _state.update { it.copy(selectedTab = index) }
+
+    /** 查询系统相册 Pictures/NiKConnect 下已有文件名，用于跨会话"已下载"标记。 */
+    private fun queryDownloadedFilenames(): Set<String> = runCatching {
+        val resolver = getApplication<Application>().contentResolver
+        val projection = arrayOf(MediaStore.Images.Media.DISPLAY_NAME)
+        val selection = "${MediaStore.Images.Media.RELATIVE_PATH} = ?"
+        val args = arrayOf("Pictures/NiKConnect/")
+        resolver.query(
+            MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
+            projection, selection, args, null,
+        )?.use { cursor ->
+            val idx = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
+            buildSet { while (cursor.moveToNext()) add(cursor.getString(idx)) }
+        } ?: emptySet()
+    }.getOrDefault(emptySet())
 
     /** 切换图库视图档位（0=大 1=中 2=小），持久化到本地。 */
     fun setGalleryViewTier(tier: Int) {

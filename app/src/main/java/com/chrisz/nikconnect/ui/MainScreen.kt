@@ -278,6 +278,12 @@ private fun GalleryScreen(
         else -> state.photos
     }
     val viewTier = state.galleryViewTier
+    val completedHandles = state.downloads
+        .filter { it.status == DownloadStatus.COMPLETED }
+        .map { it.photo.handle }
+        .toSet() + state.photos
+            .filter { it.filename in state.downloadedFilenames }
+            .map { it.handle }
     val viewMinSize = listOf(168.dp, 96.dp, 64.dp)[viewTier]
     val selected = rememberSaveable(state.photos.map { it.handle }) {
         mutableStateOf(setOf<Long>())
@@ -331,10 +337,6 @@ private fun GalleryScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
-                    val completedHandles = state.downloads
-                        .filter { it.status == DownloadStatus.COMPLETED }
-                        .map { it.photo.handle }
-                        .toSet()
                     items(filteredPhotos, key = { it.handle }) { photo ->
                         val onToggle: ((Long) -> Unit)? = if (selectionMode) {
                             { handle: Long ->
@@ -381,10 +383,8 @@ private fun GalleryScreen(
         viewerPhoto?.let { photo ->
             PhotoViewer(
                 photo = photo,
-                downloaded = photo.handle in state.downloads
-                    .filter { it.status == DownloadStatus.COMPLETED }
-                    .map { it.photo.handle }
-                    .toSet(),
+                downloaded = photo.handle in completedHandles ||
+                    photo.filename in state.downloadedFilenames,
                 thumbnailLoader = thumbnailLoader,
                 onDownload = {
                     onDownload(photo)
