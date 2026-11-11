@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -24,6 +25,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
@@ -53,6 +55,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -217,6 +220,8 @@ private fun ConnectionStep(number: String, title: String, body: String) {
     }
 }
 
+private val VIEW_TIERS = listOf("大", "中", "小")
+
 @Composable
 private fun GalleryScreen(
     state: UiState,
@@ -226,6 +231,8 @@ private fun GalleryScreen(
     thumbnailLoader: suspend (Long) -> ByteArray,
 ) {
     var selectionMode by rememberSaveable { mutableStateOf(false) }
+    var viewTier by rememberSaveable { mutableIntStateOf(0) }  // 0=大 168dp 1=中 96dp 2=小 64dp
+    val viewMinSize = listOf(168.dp, 96.dp, 64.dp)[viewTier]
     val selected = rememberSaveable(state.photos.map { it.handle }) {
         mutableStateOf(setOf<Long>())
     }
@@ -245,10 +252,19 @@ private fun GalleryScreen(
                 fontWeight = FontWeight.Bold,
             )
             if (state.photos.isNotEmpty()) {
-                TextButton(onClick = {
-                    if (selectionMode) exitSelection() else selectionMode = true
-                }) {
-                    Text(if (selectionMode) "取消" else "多选")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = {
+                        viewTier = (viewTier + 1) % VIEW_TIERS.size
+                    }) {
+                        Icon(Icons.Default.GridView, contentDescription = "切换视图大小")
+                        Spacer(Modifier.width(4.dp))
+                        Text(VIEW_TIERS[viewTier])
+                    }
+                    TextButton(onClick = {
+                        if (selectionMode) exitSelection() else selectionMode = true
+                    }) {
+                        Text(if (selectionMode) "取消" else "多选")
+                    }
                 }
             }
         }
@@ -266,7 +282,7 @@ private fun GalleryScreen(
             }
             else -> Box(Modifier.fillMaxSize()) {
                 LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 168.dp),
+                    columns = GridCells.Adaptive(minSize = viewMinSize),
                     contentPadding = PaddingValues(16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -286,6 +302,7 @@ private fun GalleryScreen(
                         }
                         PhotoCard(
                             photo = photo,
+                            compact = viewTier == 2,
                             selectionMode = selectionMode,
                             isSelected = photo.handle in selected.value,
                             onToggleSelect = onToggle,
@@ -349,6 +366,7 @@ private fun GalleryScreen(
 @Composable
 private fun PhotoCard(
     photo: PhotoObject,
+    compact: Boolean,
     selectionMode: Boolean,
     isSelected: Boolean,
     onToggleSelect: ((Long) -> Unit)?,
@@ -378,7 +396,7 @@ private fun PhotoCard(
     ) {
         Column {
             Box(
-                modifier = Modifier.fillMaxWidth().aspectRatio(1.35f).background(MaterialTheme.colorScheme.surface),
+                modifier = Modifier.fillMaxWidth().aspectRatio(if (compact) 1f else 1.35f).background(MaterialTheme.colorScheme.surface),
                 contentAlignment = Alignment.Center,
             ) {
                 if (bitmap != null) {
@@ -404,7 +422,7 @@ private fun PhotoCard(
                     )
                 }
             }
-            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            if (!compact) Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text(photo.filename, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
                     formatBytes(photo.size),
