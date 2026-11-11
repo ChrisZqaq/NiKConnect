@@ -23,7 +23,7 @@ internal class PhotoDownloader(
         photo: PhotoObject,
         onProgress: (bytesWritten: Long) -> Unit,
     ): Uri = withContext(Dispatchers.IO) {
-        require(photo.isJpeg) { "第一版仅下载原始 JPEG，RAW 支持将在真机验证后开启" }
+        require(photo.isJpeg || photo.isRaw) { "仅支持 JPEG/RAW（NEF/NRW）下载" }
         val directory = File(context.cacheDir, "downloads").apply { mkdirs() }
         val part = partialFile(directory, client.connectionId, photo)
         if (part.length() > photo.size) part.delete()
@@ -44,7 +44,7 @@ internal class PhotoDownloader(
             }
             currentCoroutineContext().ensureActive()
             client.ensureConnected()
-            publishJpeg(part, photo.filename)
+            publishImage(part, photo)
         } catch (error: Throwable) {
             // A failed or cancelled connection can never resume this fragment again.
             if (error is CancellationException || !client.isConnected) part.delete()
@@ -52,11 +52,13 @@ internal class PhotoDownloader(
         }
     }
 
-    private fun publishJpeg(part: File, filename: String): Uri {
+    /** 按 RAW/JPEG 选 MIME 发布到系统相册；文件名保留相机原始扩展名。 */
+    private fun publishImage(part: File, photo: PhotoObject): Uri {
         val resolver = context.contentResolver
+        val isRaw = photo.isRaw && !photo.isJpeg
         val values = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, filename)
-            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+            put(MediaStore.Images.Media.DISPLAY_NAME, photo.filename)
+            put(MediaStore.Images.Media.MIME_TYPE, if (isRaw) "image/x-nikon-nef" else "image/jpeg")
             put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/NiKConnect")
             put(MediaStore.Images.Media.IS_PENDING, 1)
         }

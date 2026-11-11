@@ -75,6 +75,13 @@
 - 修复：enqueue 去重只跳过 WAITING/RUNNING；COMPLETED/FAILED/CANCELLED 一律重置 QueueTask 重新入队（旧记录被新任务覆盖）。
 - 测试：原"忽略重复与已完成"用例拆为"忽略等待中重复"（gate 控制执行时机）+ 新增"重新入队已完成任务会再次下载"。30 项 JVM 测试全过；lintDebug + assembleDebug 通过。
 
+## 2026-11-11 · RAW（NEF/NRW）下载支持（PRD 0.4 内容提前）
+
+- PhotoDownloader：require 放开为 isJpeg||isRaw；publishJpeg 改名 publishImage，按 photo.isRaw 选 MIME image/x-nikon-nef（JPEG 仍 image/jpeg），仍发布到 Pictures/NiKConnect，保留相机原始扩展名。
+- UI 放闸：图库下载按钮/整卡点击/多选全选与批量下载全部放开 RAW（isJpeg||isRaw）。
+- 版本注记：PRD 中 RAW 归属 0.4（含分块对照实验与哈希验收）；本次只提前解锁传输与发布路径，0.4 验收项（真机 NEF 哈希一致）仍待真机执行。
+- 30 项 JVM 测试全过；lintDebug + assembleDebug 通过。
+
 ## 开放问题
 
 1. 真实图库规模（120 / 300 / 更大）→ 决定 0.2 分页与批量元数据优先级。

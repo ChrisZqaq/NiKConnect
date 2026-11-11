@@ -317,16 +317,17 @@ private fun GalleryScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            val allJpegSelected = state.photos.filter { it.isJpeg }.isNotEmpty() &&
-                                state.photos.filter { it.isJpeg }.all { it.handle in selected.value }
+                            val downloadable = state.photos.filter { it.isJpeg || it.isRaw }
+                            val allSelected = downloadable.isNotEmpty() &&
+                                downloadable.all { it.handle in selected.value }
                             TextButton(onClick = {
-                                selected.value = if (allJpegSelected) {
+                                selected.value = if (allSelected) {
                                     emptySet()
                                 } else {
-                                    state.photos.filter { it.isJpeg }.map { it.handle }.toSet()
+                                    downloadable.map { it.handle }.toSet()
                                 }
                             }) {
-                                Text(if (allJpegSelected) "取消全选" else "全选")
+                                Text(if (allSelected) "取消全选" else "全选")
                             }
                             Button(
                                 onClick = {
@@ -371,7 +372,7 @@ private fun PhotoCard(
         onClick = {
             when {
                 selectionMode && onToggleSelect != null -> onToggleSelect(photo.handle)
-                !selectionMode && photo.isJpeg -> onDownload(photo)
+                !selectionMode && (photo.isJpeg || photo.isRaw) -> onDownload(photo)
             }
         },
     ) {
@@ -413,11 +414,11 @@ private fun PhotoCard(
                 if (!selectionMode) {
                     Button(
                         onClick = { onDownload(photo) },
-                        enabled = photo.isJpeg,
+                        enabled = photo.isJpeg || photo.isRaw,
                         modifier = Modifier.fillMaxWidth(),
                         contentPadding = PaddingValues(horizontal = 8.dp),
                     ) {
-                        Text(if (photo.isJpeg) "下载" else "暂不支持")
+                        Text(if (photo.isJpeg || photo.isRaw) "下载" else "暂不支持")
                     }
                 }
             }
