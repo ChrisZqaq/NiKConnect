@@ -18,13 +18,12 @@
 
 ### 2.1 项目位置与基线
 
-- 项目：`/Users/chrisz/Documents/projects/nikon-connect`
-- 当前 Git HEAD：`2bc3f43`（`feat: 0.1.0 - PTP/IP direct camera-to-phone transfer`）
-- 注意：0.1.1 的多数修复仍在未提交工作树中；引用具体实现时以“当前工作树”为准。
+- 项目：`/Users/chrisz/Documents/projects/NiKConnect`（2026-11-10 起为当前仓库；旧目录 `nikon-connect` 已退役）
+- 2026-11-09 本节写作时的基线：`2bc3f43`（`feat: 0.1.0 - PTP/IP direct camera-to-phone transfer`），当时 0.1.1 修复尚在工作树。
+- 现行状态以 `../../PROGRESS.md` 与 `../acceptance/` 为准：0.1.1–0.4 已提交并有真机记录，0.5 云创原生浏览已通过 JVM/构建校验。
 - 真机：一加 Ace 5 Pro + Nikon Zf。
-- 已验收：PTP/IP 初始化、照片列表、缩略图、JPEG 原图下载。
-- 已记录的本地检查：19 项 JVM 测试、`lintDebug`、`assembleDebug`。
-- 未验收：0.1.1 真机回归、NEF/NRW、批量、后台、其他设备组合。
+- 已验收：PTP/IP 初始化、照片列表、缩略图、JPEG 原图下载；0.2 多选串行队列与分页、0.3 前台服务保活与查看器。
+- 未验收：NEF/NRW 哈希与分块对照、真机 300+ 对象分页规模、其他机型与固件组合。
 
 原始附件：[`ZF_Relay_真机验证记录.md`](ZF_Relay_真机验证记录.md)、[`ZF_Relay_MVP审查与后续开发.md`](ZF_Relay_MVP审查与后续开发.md)。
 
@@ -199,10 +198,22 @@
 
 ## 8. 未验证项清单
 
-1. 0.1.1 当前工作树尚未按 R1–R4 做真机回归。
-2. NEF/NRW、大批量、后台保活、自动重连、跨连接续传均未验收；其中跨连接续传是明确不做，而非待实现。
-3. 只有一加 Ace 5 Pro + Nikon Zf 有真机证据；固件版本应补录。
-4. 120 个对象逐个 GetObjectInfo 的实际耗时需用真实图库测量，不能预设必须引入批量扩展。
-5. Z-Relay iOS 的 NP3 类型存在不等于字段布局、写操作码或机型支持已验证。
-6. 尼康云创在线数据接口、授权和同步方式尚无足够证据；当前只规划本地 NP3。
-7. 原型是交互稿，不是协议、性能或功能完成证明。
+1. NEF/NRW 哈希与分块对照未执行；大批量与跨连接续传中"跨连接续传"是明确不做，而非待实现。
+2. 只有一加 Ace 5 Pro + Nikon Zf 有真机证据；固件版本应补录。
+3. 真机 300+ 对象逐页 GetObjectInfo 的耗时与页大小 60 的合理性仍需实测，不预设必须引入批量扩展。
+4. Z-Relay iOS 的 NP3 类型存在不等于字段布局、写操作码或机型支持已验证（本地 NP3 写入仍在暂缓区）。
+5. 云创登录态接口（收藏到书、`GET/PATCH /camera/{guid}/{cameraId}` 槽位排布）响应形状与相机端同步闭环未真机验证；零登录目录/详情已实测（见 §9）。
+6. 原型是交互稿，不是协议、性能或功能完成证明。
+
+## 9. 云创与 NP3 证据（2026-11-12 追加）
+
+| 结论 | 等级 | 证据位置 |
+|---|---|---|
+| 云创官方书 144 个方案目录零登录可取，含签名封面 URL 与点赞数 | A/B | `NIKON_CLOUD_RESEARCH.md` §7；`../data/recipes/list.json` |
+| 方案详情零登录可取，含 10 项优化校准参数、EXIF、说明与上下篇 | A/B | `NIKON_CLOUD_RESEARCH.md` §7；`../data/recipes/details/` |
+| 详情接口有 IP 级频控，`E01_0701` 静默约 45s 恢复；稳定 1.5–3s/请求可通过 | A | `NIKON_CLOUD_RESEARCH.md` §7 |
+| 封面签名 URL 有效期约 1 小时，可直连下载，不绑定来源 IP | A | 同上（解 Base64 Policy） |
+| 登录态收藏、建书、本地方案、相机槽位 C001–C005 接口存在 | B | `NIKON_CLOUD_RESEARCH.md` §6 §8（前端 chunk 反解，未真机调用） |
+| NP3 二进制结构（`NCP\0` 头、TLV、BI0 自定义曲线尾）已逆向，32/32 样本字节级 roundtrip | A | `../research/np3-format.md`；`app/src/test/java/com/chrisz/nikconnect/np3/Np3FileTest.kt` |
+| 云创参数 → NP3 tag 映射 32/32 全对；曲线/色相表/BI0 尾不在 API 内 | A | `../research/np3-generation-report.md` |
+| 云创服务端不下发 NP3 字节（无下载端点），方案由相机主动拉取 | B | `NIKON_CLOUD_RESEARCH.md` §8；`../research/np3-generation-report.md` |

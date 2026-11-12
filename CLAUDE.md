@@ -8,12 +8,14 @@
 |---|---|---|---|
 | 协议 | `ptp/` | 小端编解码、PTP/IP 数据包、事务、数据集、操作码/响应码 | 不做 I/O 决策，不依赖 Android UI |
 | 相机 | `camera/` | Wi-Fi 获取、候选地址、会话资源、分块下载、MediaStore 发布 | 不解析 UI 状态 |
-| 界面 | `ui/` | 页面状态、用户操作、generation 管理、错误展示 | 不直接解析 PTP 字节，不自建 socket |
+| 云创 | `cloud/` | 云创 HTTP：零登录目录/详情、登录态账号接口、串行限速与频控退避、响应解析 | 不发 PTP 命令；token 不落盘、不进日志 |
+| 界面 | `ui/` | 页面状态、用户操作、generation 管理、错误展示 | 不直接解析 PTP 字节，不自建 socket；不发 HTTP（经 `cloud/`） |
 | 滤镜（未来） | `picturecontrol/` | NP3 解析、槽位模型、备份、写入读回 | 不在下载事务中夹带隐式副作用 |
 
 硬约束（违反即 bug，不接受以性能为由豁免）：
 
 - 相机命令保持串行：同一 `PtpIpClient` 事务 `@Synchronized`，迟包/错配/超时直接关闭双通道。
+- 云创请求遵守服务端频控：`CloudCatalogClient` 内部串行限速与 `E01_0701` 退避，新增端点复用同一入口，不在页面里裸发请求。
 - 会话隔离：`connectionId`/generation 是异步结果与断点数据的边界；跨连接不复用句柄、缩略图、任务或 `.part` 文件。
 - 只读相机：不加入删除相机文件或静默覆盖的行为；第二阶段写操作必须先读、备份、用户确认、读回。
 - 文件完整性高于速度：不以删除校验换取"提速"；协议常量（15740 端口、4MiB 分块、350ms settle delay）改动必须配对照实验。
@@ -41,7 +43,7 @@
 
 ## 4. 版本与提交
 
-- 版本号 `0.MINOR.PATCH`：MINOR 对应 PRD 阶段（0.2 基础导出、0.3 后台、0.4 RAW、B0/B1 滤镜），PATCH 为该阶段内修复。版本写 `app/build.gradle.kts` 的 `versionName`/`versionCode`。
+- 版本号 `0.MINOR.PATCH`：MINOR 对应 PRD 阶段（0.2 基础导出、0.3 后台、0.4 RAW、0.5 云创原生浏览、0.6 云创账号、B0/B1 滤镜），PATCH 为该阶段内修复。版本写 `app/build.gradle.kts` 的 `versionName`/`versionCode`。
 - 一个提交一个任务：开发 → 测试 → 文档 → commit，不攒大包。提交信息英文祈使句，格式 `type: summary`（feat / fix / refactor / docs / test / chore）。
 - 纯重构（如改名）单独成批，不与功能混提交。
 - 每个版本发布前打 tag（`v0.1.1` 风格）。

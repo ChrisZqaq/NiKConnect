@@ -1,8 +1,10 @@
 # NiKConnect
 
-Android 优先的 Nikon 相机本地连接、浏览与原文件导出工具。Kotlin + Jetpack Compose + PTP/IP 直连，无账号、无云端、无服务端。
+Android 优先的 Nikon 相机本地连接、浏览与原文件导出工具。Kotlin + Jetpack Compose + PTP/IP 直连。照片链路完全本地，不经过自建服务端。
 
-当前真机基线：Nikon Zf（PTP/IP 连接、照片列表、缩略图、JPEG 原图下载已验收）。
+云创浏览是独立能力：手机有互联网时可浏览尼康云创 144 个官方色彩方案（目录与详情零登录可取）与优化校准参数；方案下发到相机仍由相机自身联网完成，App 不宣称代办同步。
+
+当前真机基线：Nikon Zf（连接、照片列表、缩略图、JPEG/NEF 下载、串行队列、后台保活已验收；0.4 RAW 哈希对照与 0.5 云创原生页待验收）。
 
 ## 文档
 
@@ -11,6 +13,8 @@ Android 优先的 Nikon 相机本地连接、浏览与原文件导出工具。Ko
 - 工程规范：[CLAUDE.md](CLAUDE.md)（`AGENTS.md` 为其符号链接）
 - 进展与问题记录：[PROGRESS.md](PROGRESS.md)
 - 验收记录：[docs/acceptance/](docs/acceptance/)
+- 云创接口实测：[docs/references/NIKON_CLOUD_RESEARCH.md](docs/references/NIKON_CLOUD_RESEARCH.md)
+- NP3 格式与生成报告：[docs/research/](docs/research/)
 - 交互原型（仅视觉参考）：[docs/prototype/](docs/prototype/README.md)
 
 ## 本地检查

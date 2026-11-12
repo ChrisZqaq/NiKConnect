@@ -218,6 +218,16 @@
 - 版本：0.5.0-alpha（versionCode 5）。
 - 待真机：封面加载与滚动性能、详情频控退避在真实网络下的表现、离线种子首屏与在线刷新的衔接。
 
+## 2026-11-12 · 文档一致性更新（无代码改动）
+
+- 起因：用户要求检查 0.5 落地后文档是否同步。
+- `docs/PRD.md` v1.1→v1.2：改写 §3.1/§3.2 中"Git HEAD 仍是 0.1.0 的 2bc3f43""0.1.1 修复尚未真机回归"等严重过期表述；§6 路线图补 0.5 行与 0.6（计划中）行；§7.5 新增 C-11（零登录目录浏览）/C-12（详情参数与 EXIF）/C-13（频控退避与失败不清列表）；§8.1 补云创页界面条目；§9.1 新增 `cloud/` 模块行；§12 新增 0.5 真机验收行。
+- `docs/README.md` 重写索引：补 `NIKON_CLOUD_RESEARCH.md`、`research/np3-format.md`、`research/np3-generation-report.md`、`data/recipes/`（list/details/generated）；维护规则补"本机无 pandoc/soffice 时先记未同步，不提交过期 docx"。
+- `README.md` 删掉与现状冲突的"无账号、无云端、无服务端"，改为照片链路本地、云创浏览为独立能力的表述；真机基线补 0.2–0.4 已验收与 0.5 待验。
+- `docs/references/TECHNICAL_REFERENCES.md` §2.1 更新仓库路径与基线、§8 未验证项按现状重写，新增 §9 云创与 NP3 证据表（7 条，含证据等级与文件位置）。
+- `CLAUDE.md`（`AGENTS.md` 同源）分层表新增「云创 | `cloud/`」行，`ui/` 禁止项加"不发 HTTP（经 `cloud/`）"，硬约束新增云创频控串行条，版本映射补 0.5/0.6。
+- 未同步：`docs/NiKConnect_PRD.docx` 与 `docs/NiKConnect_参考附件.zip` 仍是旧版——本机 `which pandoc soffice` 均无结果，无法就地生成；需要时再装工具重出，或由用户用 Word/WPS 手工导出。
+
 ## 开放问题
 
 1. 真实图库规模（120 / 300 / 更大）→ 决定 0.2 分页与批量元数据优先级。
