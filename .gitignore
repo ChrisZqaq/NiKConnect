@@ -9,3 +9,7 @@ local.properties
 *-error.jpg
 .DS_Store
 reference/
+
+# Python
+__pycache__/
+*.pyc
