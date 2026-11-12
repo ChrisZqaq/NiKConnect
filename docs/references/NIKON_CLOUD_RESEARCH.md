@@ -79,3 +79,43 @@ B0 技术探针清单（待排期）：
 真正的"选方案 → 占 9 个槽位 → 相机同步"应走 `PATCH /camera/{guid}/{cameraId}`。
 
 **槽位性质**：网页管理的是相机的「云创槽位」（9 个），与相机内的自定义槽位 C-1…C-9 不是同一套存储；同步后出现在设定优化校准的云创区，要进 C-1…C-9 仍需相机内「管理优化校准 → 保存/编辑」复制。
+
+## 7. 零登录目录接口实测（2026-11-12 复核）
+
+**主机必须用 `.com.cn`**：`api.user.cwp.imagingcloud.nikon.com.cn`。同名 `.com` 主机（`api.user.cwp.imagingcloud.nikon.com`）对 `/bff/recipe/release` 返回 `{"error_code":"E01_9998"}`，此前记录有误。
+
+`POST https://api.user.cwp.imagingcloud.nikon.com.cn/bff/recipe/release`
+- Header：`Content-Type: text/plain;charset=UTF-8`、`Origin: https://imagingcloud.nikon.com.cn`、`Referer: https://imagingcloud.nikon.com.cn/`
+- Body：`{"ownerUserId":"nikon","bookId":"01HXDNNTHY1AZ6RVMMXSXY3BTK","sortType":0,"lang_code":"zh-cn","country":"CN"}`
+
+`sortType` 决定响应里有没有封面：
+
+| sortType | 条数 | 每条字段 |
+| --- | --- | --- |
+| `0` | 144 | `img{url}`、`name`、`picture_controll_name`、`public_date`、`id`、`is_new`、`like{num,status}` |
+| `1` | 144 | 同上但**无 `img`**（按热度序） |
+
+`img.url` 是 CloudFront 签名地址，实测可直接下载（HTTP 200，约 49KB JPEG）。
+解 Base64 `Policy` 得到：`Resource: .../thumbnail/*.JPG`、`DateLessThan ≈ 下发后 1 小时`、`IpAddress: 0.0.0.0/0`（**不绑 IP**）。
+→ 封面必须运行期拉取，不能提前烤进仓库；但可在 App 内做磁盘缓存，过期（1h）后重新取。
+
+详情：`GET https://api.user.ir.imagingcloud.nikon.com.cn/publicrecipe/0000000000000001/{recipeId}?sortType=0&isPagenation=false`
+可拿到 `name`、`recipeDetail`（正文描述）、`pictureControl{settingName,baseName,quickSharp,sharpening,middleRangeSharp,clarity,contrast,saturation,highlight,shadow,whiteLevel,blackLevel}`、`exif`（相机/镜头/ISO/快门/光圈/白平衡等）、`camera`、`lens`、`camera_detail_url`、`lens_detail_url`、`tags`、`thumbnail`。
+注意 IP 级频控：连续请求后返回 `{"error_code":"E01_0701"}`，静默约 45s 恢复；稳定 1.5–3s/请求可通过。App 端应按需（点进详情）再请求，不要 144 个并发。
+
+## 8. 登录后操作接口全集（来自 /recipe/index chunk）
+
+| callId | 方法 + 路径 | 作用 |
+| --- | --- | --- |
+| `IF_FR100_H05` | `POST /bff/recipe`（`.cwp`，header `access_token`，body `{filter,country,lang_code}`） | 我的方案列表 |
+| `IF_IR_R_PR001` | `POST /publicrecipe/{guid}` Bearer `{bookId, recipeIds}` | 加入书（收藏） |
+| `IF_IR_R_PB002` | `POST /publicbook/{guid}` Bearer `{name}` | 新建书 |
+| `IF_IR_R_LR003` | `PUT /localrecipe/{guid}` Bearer `{recipeIds}` | 写本地方案 |
+| `IF_IR_R_C001` | `GET /camera/{guid}/` Bearer | 相机列表 |
+| `IF_IR_R_C003` | `POST /camera/{guid}/{cameraId}` Bearer `{recipeIds}` | 向相机追加方案 |
+| `IF_IR_R_C002` | `GET /camera/{guid}/{cameraId}` Bearer | 读 9 槽排布 |
+| `IF_IR_R_C004` | `PATCH /camera/{guid}/{cameraId}` Bearer `{recipes:[...]}` | 提交 9 槽排布（顺序即槽位） |
+| `IF_IR_R_C005` | `DELETE /camera/{guid}/{cameraId}/{recipeId}` Bearer | 从相机移除某方案 |
+| `IF_FR100_H13` | `POST /bff/recipe/camera`（`.cwp`，`access_token`，`{country}`） | 可分配给相机的方案列表 |
+
+结论：云创 Web 的所有用户操作都是普通 HTTP + `access_token`/`Bearer`，没有客户端签名或设备指纹。原生 App UI 可以完整复刻，WebView 只需承担一次登录。
