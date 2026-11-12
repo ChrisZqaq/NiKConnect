@@ -10,7 +10,6 @@ import androidx.lifecycle.viewModelScope
 import com.chrisz.nikconnect.camera.CameraRepository
 import com.chrisz.nikconnect.camera.PhotoDownloader
 import com.chrisz.nikconnect.camera.ConnectionKeeperService
-import com.chrisz.nikconnect.cloud.NikonCloudClient
 import com.chrisz.nikconnect.ptp.DeviceInfo
 import com.chrisz.nikconnect.ptp.PhotoObject
 import com.chrisz.nikconnect.ptp.PtpException
@@ -56,9 +55,6 @@ internal data class UiState(
     /** 尼康云创登录态：token 仅驻留内存，guid 可持久化到 ui_prefs。 */
     val cloudToken: String? = null,
     val cloudGuid: String? = null,
-    val cloudRecipes: List<NikonCloudClient.RecipeSummary> = emptyList(),
-    val cloudLoading: Boolean = false,
-    val cloudError: String? = null,
 ) {
     val downloading: Boolean get() = downloads.any { it.status == DownloadStatus.DOWNLOADING }
     val canDownload: Boolean get() = connectionStatus == ConnectionStatus.CONNECTED && !downloading
@@ -136,57 +132,14 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
 
     /** 云创登录完成（WebView 抓取或手动粘贴）。token 不持久化，guid 可保留到本地。 */
     fun onCloudLogin(state: CloudAuthState) {
-        cloudRequest?.cancel()
         prefs.edit().remove("cloud_token").apply()
         state.guid?.let { prefs.edit().putString("cloud_guid", it).apply() }
-        _state.update { it.copy(cloudToken = state.token, cloudGuid = state.guid ?: it.cloudGuid, cloudError = null) }
-        loadCloudRecipes()
+        _state.update { it.copy(cloudToken = state.token, cloudGuid = state.guid ?: it.cloudGuid) }
     }
 
     fun cloudLogout() {
-        cloudRequest?.cancel()
         prefs.edit().remove("cloud_token").remove("cloud_guid").apply()
-        _state.update { it.copy(cloudToken = null, cloudGuid = null, cloudRecipes = emptyList(), cloudError = null, cloudLoading = false) }
-    }
-
-    private var cloudRequest: kotlinx.coroutines.Job? = null
-
-    /** 拉取云创方案列表（元数据；真实响应形状以登录后返回为准，解析失败给 UI 提示）。 */
-    fun loadCloudRecipes() {
-        val token = _state.value.cloudToken ?: return
-        val guid = _state.value.cloudGuid ?: return
-        cloudRequest?.cancel()
-        _state.update { it.copy(cloudLoading = true, cloudError = null) }
-        cloudRequest = viewModelScope.launch {
-            try {
-                val result = NikonCloudClient(accessToken = token, guid = guid).listRecipes()
-                if (_state.value.cloudToken == token && _state.value.cloudGuid == guid) {
-                    _state.update { it.copy(cloudLoading = false, cloudRecipes = result.recipes) }
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                if (_state.value.cloudToken == token && _state.value.cloudGuid == guid) {
-                    _state.update { it.copy(cloudLoading = false, cloudError = e.message ?: "云创请求失败") }
-                }
-            }
-        }
-    }
-
-    /** 收藏方案到书（后续相机连云创 Wi-Fi 自动拉取）。 */
-    fun addRecipesToCamera(recipeIds: List<String>, onResult: (Boolean, String?) -> Unit) {
-        val token = _state.value.cloudToken ?: run { onResult(false, "未登录云创"); return }
-        val guid = _state.value.cloudGuid ?: run { onResult(false, "缺少相机 guid（云创 Web 我的相机页取）"); return }
-        viewModelScope.launch {
-            try {
-                NikonCloudClient(accessToken = token, guid = guid).addRecipesToBook(bookId = guid, recipeIds = recipeIds)
-                if (_state.value.cloudToken == token && _state.value.cloudGuid == guid) onResult(true, null)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                if (_state.value.cloudToken == token && _state.value.cloudGuid == guid) onResult(false, e.message)
-            }
-        }
+        _state.update { it.copy(cloudToken = null, cloudGuid = null) }
     }
 
     fun connect(manualHost: String) {

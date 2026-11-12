@@ -1,14 +1,14 @@
 # NiKConnect 开发进展与问题记录
 
-最后更新：2026-11-11
+最后更新：2026-11-12
 
 > 本文件是唯一的活动进展记录。每完成一个开发/测试批次就更新；问题按"发现→分析→处置"记录。历史归档见 [docs/references/ZF_Relay_真机验证记录.md](docs/references/ZF_Relay_真机验证记录.md)。
 
 ## 当前状态
 
-- **版本**：0.4.0-alpha（当前代码包含 RAW 导出与云创登录/方案浏览；本轮修复待真机回归）
+- **版本**：0.5.0-alpha（云创原生浏览页，零登录可用；JVM 51 项测试通过，真机未验）
 - **真机基线**：一加 Ace 5 Pro + Nikon Zf
-- **未关闭验证**：0.4 RAW 哈希/分块对照、本轮云创登录与相机重连真机回归；真实云创 API 字段/收藏语义与机身同步闭环待验证
+- **未关闭验证**：0.4 RAW 哈希/分块对照、云创登录 token 提取（提交 8a9173b）真机回归；0.5 云创原生页真机（封面加载、详情参数、频控退避）；云创账号语义（收藏到书 vs 相机槽位）待批次 2 验证
 
 ## 版本历史
 
@@ -16,6 +16,10 @@
 |---|---|---|---|
 | 0.1.0 | PTP/IP 连接、最近照片、缩略图、单张 JPEG 下载 | ✅ 用户验收 | [docs/acceptance/0.1.0.md](docs/acceptance/0.1.0.md) |
 | 0.1.1 | R1–R4 修复：会话隔离、退出不阻塞、断线同步 UI、跨连接残片清理；19 项 JVM 测试 | ✅ 用户确认（2026-11-09） | [docs/acceptance/0.1.1.md](docs/acceptance/0.1.1.md) |
+| 0.2 | 串行下载队列、传输页取消/重试、图库多选、图库分页 | ✅ 用户确认 | [docs/acceptance/0.2.md](docs/acceptance/0.2.md) |
+| 0.3 | 前台服务保活、唤醒锁、UI 重整、单图查看器、跨会话已下载角标 | ✅ 用户确认 | [docs/acceptance/0.3.md](docs/acceptance/0.3.md) |
+| 0.4 | RAW（NEF/NRW）传输与发布、图库三档视图 | ⏳ 哈希/分块对照待补 | [docs/acceptance/0.4.md](docs/acceptance/0.4.md) |
+| 0.5 | 云创原生浏览页（目录/搜索/排序/详情/参数表，零登录） | ⏳ 待真机 | — |
 
 ## 2026-11-10 · 0.2 批次 1：串行下载队列（已完成）
 
@@ -202,9 +206,23 @@
 - 云创列表/收藏请求在凭据变化时忽略旧结果并正确传播协程取消；关闭 Android 自动备份，避免 App 数据被系统备份。
 - 验证：40 项 JVM 测试全过；`:app:lintDebug`、`:app:assembleDebug` 通过（2026-11-11）；`git diff --check` 通过。真机回归仍待执行。
 
+## 2026-11-12 · 0.5 批次 1：云创原生浏览页（替代 WebView 壳）
+
+- 背景：用户反馈云创网页移动端未优化，要求按移动端设计规范重做展示界面；接口面已实测（docs/references/NIKON_CLOUD_RESEARCH.md §7/§8），目录与详情均零登录可取。
+- 新增 `cloud/CloudCatalogClient`：目录 `POST {CWP}/bff/recipe/release`（sortType=0 带签名封面 URL）、详情 `GET {IR}/publicrecipe/0000000000000001/{id}?sortType=0&isPagenation=false`；Mutex 串行限速（默认 1.2s/请求）+ `E01_0701` 频控退避重试 3 次（3s×attempt）；`parseCatalog`/`parseDetail` 为纯函数供 JVM 测试。
+- 新增 `ui/CloudCatalogViewModel`：先读 `assets/cloud/catalog_seed.json`（144 条离线索引，无封面）上屏，再后台刷新补封面；刷新失败只置错误、不清空已有列表；搜索（名称/英文代号）、排序（推荐/最新/热门）、仅 NEW 为派生过滤；详情单独加载，失败不污染列表。
+- 新增 `ui/RemoteImage`：`produceState` 异步解码 + 内存 LruCache 24MB + `cacheDir/cloud_covers/<sha256>.jpg` 磁盘缓存（封面签名 URL 仅 1 小时有效，故缓存按 URL 哈希分文件）。
+- 新增 `ui/CloudBrowseScreen`：标题「创意色彩灵感库」+「尼康云创 · N 个方案」；搜索框（14dp 圆角、surfaceVariant 填充）；横向 FilterChip 排序条；`PullToRefreshBox` + 双列网格（卡片 16dp 圆角、1.5:1 封面、底部渐变压名称、NEW 金色角标、英文代号 + 点赞数）；6 格骨架屏与空态；详情页含头图、作者/基准/设置名 chip、「色彩说明」正文、双列参数表（10 项优化校准）、样片机身/镜头/EXIF、上一/下一方案切换、云创同步说明脚注。触控目标统一 ≥48dp。
+- 清理：删除旧 `CloudRecipesScreen`（多选收藏 UI 与 WebView 内嵌列表）；`MainViewModel` 去掉 `loadCloudRecipes`/`addRecipesToCamera` 与 `cloudRecipes`/`cloudLoading`/`cloudError`，只保留 token/guid；旧 `cloud/NikonCloudClient` 暂留（批次 2 账号接口用，当前无引用）。
+- 测试：新增 `CloudCatalogClientTest` 9 项（目录含/无封面、缺 id 跳过、body 包裹与 error_code、详情参数与 EXIF 抽取、`-`/`0` 视为未设置、非法 JSON、缺 id）；全套 51 项 JVM 测试全过，lintDebug 0 error/6 warning（均为既有项），assembleDebug 通过。
+- 版本：0.5.0-alpha（versionCode 5）。
+- 待真机：封面加载与滚动性能、详情频控退避在真实网络下的表现、离线种子首屏与在线刷新的衔接。
+
 ## 开放问题
 
 1. 真实图库规模（120 / 300 / 更大）→ 决定 0.2 分页与批量元数据优先级。
 2. 后台下载是否当前痛点 → 决定 0.3 排期。
 3. RAW 文件类型与大小分布 → 0.4 样本。
 4. NP3 写字段与机型能力（B0 探针前不排期）。
+5. 云创账号语义：`POST /publicrecipe/{guid}`（收藏到书）与 `PATCH /camera/{guid}/{cameraId}`（相机 9 槽排布）在 App 内的分工，批次 2 决定。
+6. 云创详情接口 IP 级频控（E01_0701）：是否需要把 144 个详情预取进 assets（体积/时效权衡）。

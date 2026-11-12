@@ -97,8 +97,6 @@ internal fun NiKConnectApp(model: MainViewModel) {
         onViewTier = model::setGalleryViewTier,
         onCloudLogin = model::onCloudLogin,
         onCloudLogout = model::cloudLogout,
-        onLoadCloudRecipes = model::loadCloudRecipes,
-        onAddRecipesToCamera = model::addRecipesToCamera,
         thumbnailLoader = model::thumbnail,
     )
 }
@@ -119,8 +117,6 @@ private fun NiKConnectContent(
     onViewTier: (Int) -> Unit,
     onCloudLogin: (CloudAuthState) -> Unit,
     onCloudLogout: () -> Unit,
-    onLoadCloudRecipes: () -> Unit,
-    onAddRecipesToCamera: (List<String>, (Boolean, String?) -> Unit) -> Unit,
     thumbnailLoader: suspend (Long) -> ByteArray,
 ) {
     val connected = state.connectionStatus == ConnectionStatus.CONNECTED
@@ -170,13 +166,13 @@ private fun NiKConnectContent(
             if (!connected && state.selectedTab != 2) {
                 ConnectionScreen(state, onConnect)
             } else if (!connected && state.selectedTab == 2) {
-                CloudRecipesScreen(state, onCloudLogin, onCloudLogout, onLoadCloudRecipes, onAddRecipesToCamera)
+                CloudTab(cloudToken = state.cloudToken, onLogin = onCloudLogin, onLogout = onCloudLogout)
             } else if (state.selectedTab == 0) {
                 GalleryScreen(state, onDownload, onDownloadAll, onLoadMore, onViewTier, thumbnailLoader)
             } else if (state.selectedTab == 1) {
                 TransferScreen(state, onRetryDownload, onCancelDownload)
             } else {
-                CloudRecipesScreen(state, onCloudLogin, onCloudLogout, onLoadCloudRecipes, onAddRecipesToCamera)
+                CloudTab(cloudToken = state.cloudToken, onLogin = onCloudLogin, onLogout = onCloudLogout)
             }
         }
     }
@@ -727,120 +723,6 @@ private fun TransferScreen(
     }
 }
 
-/**
- * 云创方案浏览页（B0 batch 2）：登录 Nikon ID → 拉方案列表 → 收藏到相机注册列表。
- * 传输由云创↔相机完成：用户在相机菜单"Add Cloud Picture Control files"时自动同步。
- */
-@Composable
-private fun CloudRecipesScreen(
-    state: UiState,
-    onCloudLogin: (CloudAuthState) -> Unit,
-    onCloudLogout: () -> Unit,
-    onLoadCloudRecipes: () -> Unit,
-    onAddRecipesToCamera: (List<String>, (Boolean, String?) -> Unit) -> Unit,
-) {
-    var showLogin by rememberSaveable { mutableStateOf(false) }
-    var selected by rememberSaveable { mutableStateOf(setOf<String>()) }
-    var toast by rememberSaveable { mutableStateOf<String?>(null) }
-
-    if (showLogin) {
-        CloudLoginScreen(
-            onDone = { auth ->
-                showLogin = false
-                if (auth.token != null) onCloudLogin(auth)
-            },
-            onDismiss = { showLogin = false },
-        )
-        return
-    }
-
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("尼康云创方案", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.weight(1f))
-            if (state.cloudToken != null) {
-                TextButton(onClick = onCloudLogout) { Text("退出登录") }
-            }
-        }
-        when {
-            state.cloudToken == null -> {
-                Text("登录 Nikon ID 后浏览云创色彩方案，收藏后相机会在连接云创 Wi-Fi 时自动同步。", style = MaterialTheme.typography.bodySmall)
-                Button(
-                    onClick = { showLogin = true },
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp).height(52.dp),
-                ) { Text("登录尼康云创") }
-            }
-            state.cloudLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-            state.cloudError != null -> {
-                ErrorCard("云创：$state.cloudError", Modifier.padding(vertical = 8.dp))
-                TextButton(onClick = onLoadCloudRecipes) { Text("重试") }
-            }
-            state.cloudGuid == null -> {
-                Text(
-                    "缺少相机 guid：登录后在云创 Web「我的相机」页把相机注册 ID 填入（用「手动输入」入口）。",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            else -> {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        if (selected.isEmpty()) "已选 0 项（相机最多装 9 个方案）"
-                        else "已选 ${selected.size} 项",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Spacer(Modifier.weight(1f))
-                    if (selected.isNotEmpty()) {
-                        TextButton(onClick = { selected = emptySet() }) { Text("取消") }
-                        Button(onClick = {
-                            onAddRecipesToCamera(selected.toList()) { ok, err ->
-                                toast = if (ok) "已收藏 ${selected.size} 项：相机下次连云创 Wi-Fi 时自动同步" else "收藏失败：$err"
-                                if (ok) selected = emptySet()
-                            }
-                        }) { Text("收藏到相机") }
-                    } else {
-                        IconButton(onClick = onLoadCloudRecipes) {
-                            Icon(Icons.Default.Refresh, contentDescription = "刷新方案")
-                        }
-                    }
-                }
-                if (state.cloudRecipes.isEmpty()) {
-                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        Text("暂无方案", style = MaterialTheme.typography.bodyMedium)
-                    }
-                } else {
-                    LazyVerticalGrid(
-                        columns = GridCells.Adaptive(96.dp),
-                        modifier = Modifier.weight(1f),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        items(state.cloudRecipes, key = { it.id }) { recipe ->
-                            val checked = recipe.id in selected
-                            Card(
-                                modifier = Modifier.clickable {
-                                    selected = if (checked) selected - recipe.id else selected + recipe.id
-                                },
-                                colors = CardDefaults.cardColors(
-                                    containerColor = if (checked) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
-                                ),
-                            ) {
-                                Column(Modifier.padding(8.dp)) {
-                                    Text(recipe.name, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                                    if (recipe.creator.isNotBlank()) {
-                                        Text(recipe.creator, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        toast?.let {
-            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.padding(top = 8.dp))
-        }
-    }
-}
 
 @Composable
 private fun ErrorCard(message: String, modifier: Modifier = Modifier) {
@@ -887,8 +769,6 @@ private fun GalleryPreview() {
             onViewTier = {},
             onCloudLogin = {},
             onCloudLogout = {},
-            onLoadCloudRecipes = {},
-            onAddRecipesToCamera = { _, _ -> },
             thumbnailLoader = { ByteArray(0) },
         )
     }
