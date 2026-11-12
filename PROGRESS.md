@@ -6,9 +6,9 @@
 
 ## 当前状态
 
-- **版本**：0.5.0-alpha（云创原生浏览页，零登录可用；JVM 51 项测试通过，真机未验）
+- **版本**：0.5.1-alpha（云创原生浏览页 + token 抓取改为拦截接口请求头；JVM 51 项测试通过，真机未验）
 - **真机基线**：一加 Ace 5 Pro + Nikon Zf
-- **未关闭验证**：0.4 RAW 哈希/分块对照、云创登录 token 提取（提交 8a9173b）真机回归；0.5 云创原生页真机（封面加载、详情参数、频控退避）；云创账号语义（收藏到书 vs 相机槽位）待批次 2 验证
+- **未关闭验证**：0.4 RAW 哈希/分块对照、云创登录 token 提取（0.5.1 改为请求头拦截，待真机）；0.5 云创原生页真机（封面加载、详情参数、频控退避）；云创账号语义（收藏到书 vs 相机槽位）待批次 2 验证
 
 ## 版本历史
 
@@ -20,6 +20,7 @@
 | 0.3 | 前台服务保活、唤醒锁、UI 重整、单图查看器、跨会话已下载角标 | ✅ 用户确认 | [docs/acceptance/0.3.md](docs/acceptance/0.3.md) |
 | 0.4 | RAW（NEF/NRW）传输与发布、图库三档视图 | ⏳ 哈希/分块对照待补 | [docs/acceptance/0.4.md](docs/acceptance/0.4.md) |
 | 0.5 | 云创原生浏览页（目录/搜索/排序/详情/参数表，零登录） | ⏳ 待真机 | — |
+| 0.5.1 | token 抓取改为 WebView 拦截接口请求头（HttpOnly 也能拿）、网格滚动状态归位入口、登录页反馈 | ⏳ 待真机 | — |
 
 ## 2026-11-10 · 0.2 批次 1：串行下载队列（已完成）
 
@@ -227,6 +228,15 @@
 - `docs/references/TECHNICAL_REFERENCES.md` §2.1 更新仓库路径与基线、§8 未验证项按现状重写，新增 §9 云创与 NP3 证据表（7 条，含证据等级与文件位置）。
 - `CLAUDE.md`（`AGENTS.md` 同源）分层表新增「云创 | `cloud/`」行，`ui/` 禁止项加"不发 HTTP（经 `cloud/`）"，硬约束新增云创频控串行条，版本映射补 0.5/0.6。
 - 未同步：`docs/NiKConnect_PRD.docx` 与 `docs/NiKConnect_参考附件.zip` 仍是旧版——本机 `which pandoc soffice` 均无结果，无法就地生成；需要时再装工具重出，或由用户用 Word/WPS 手工导出。
+
+## 2026-11-12 · 0.5.1：token 抓取重做与列表入口位置
+
+真机反馈三个问题（用户 21:24）：进入云创 tab 列表停在最后一行；登录后仍抓不到 token、点「提取 token」没反应；UI 里的「相机注册 ID（guid）」看不懂。
+
+- **token 抓不到**：旧实现只在 WebView 页面 JS 环境里扫 localStorage/sessionStorage/cookie。尼康云创把 token 放在 HttpOnly cookie 或内存里时 JS 读不到，扫描必然返回空；而返回空时旧代码没有任何提示，所以「点了没作用」。改为在 `WebViewClient.shouldInterceptRequest` 里读请求头：页面自身调云创接口时 `access_token`（或 `Authorization: Bearer`）一定是明文，即使 cookie 是 HttpOnly 也能截到；同时从 URL 里提取 26 位 ULID 作为账号 guid；`onPageStarted` 再兜一层 `#access_token=`/`?access_token=`。JS 扫描降级为次要来源，未命中时弹提示「请先在网页里点开任意方案」。
+- **列表停在最后一行**：代码里没有任何滚动到底的调用。最可能是 `rememberLazyGridState`（Compose 内部即 `rememberSaveable`）的状态被跨组合恢复。改为在 `CloudTab` 用普通 `remember { LazyGridState() }` 持有并下传：进出 tab 必从第一条开始，查看详情再返回仍保留位置。
+- **「相机注册 ID」文案错误**：云创的 `guid` 不是相机 ID，是**账号**维度标识（26 位 ULID，出现在 `/camera/{guid}/`、`/publicrecipe/{guid}` 路径里）；0.5 的零登录浏览根本不需要它，只在 0.6 的账号接口（收藏、相机槽位）才用。文案改为「账号 guid（可留空)」，并说明来源。
+- 验证：`:app:compileDebugKotlin`、`:app:testDebugUnitTest`（51 项）、`:app:assembleDebug`（--offline）通过；版本 0.5.1-alpha（versionCode 6）。真机待验：token 是否能在登录后自动出现、列表入口是否回到顶部。
 
 ## 开放问题
 

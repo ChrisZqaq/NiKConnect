@@ -4,18 +4,21 @@ import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import android.webkit.WebResourceRequest
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import android.widget.Toast
 
 /** 在当前页面 origin 内扫描 localStorage/sessionStorage/cookie，提取 access_token（JWT 以 eyJ 开头，不含 |）。 */
 private val TOKEN_EXTRACT_JS = """
@@ -48,10 +51,40 @@ private val TOKEN_EXTRACT_JS = """
 })()
 """.trimIndent()
 
+/** 从请求头里取云创 token：优先 `access_token`，其次 `Authorization: Bearer`。 */
+private fun tokenFromHeaders(headers: Map<String, String>?): String? {
+    if (headers.isNullOrEmpty()) return null
+    headers.entries.firstOrNull { it.key.equals("access_token", ignoreCase = true) }
+        ?.value?.trim()?.takeIf { it.length > 40 }?.let { return it }
+    headers.entries.firstOrNull { it.key.equals("authorization", ignoreCase = true) }
+        ?.value?.trim()
+        ?.takeIf { it.startsWith("Bearer ", ignoreCase = true) }
+        ?.substring(7)?.trim()?.takeIf { it.length > 40 }?.let { return it }
+    return null
+}
+
+/** 云创账号 guid 是 ULID（26 位 Crockford Base32），出现在 `/camera/{guid}/` 这类路径里。 */
+private val GUID_IN_URL = Regex("[0-9A-HJKMNP-TV-Z]{26}")
+
+/** 从 URL 里兜底取 guid；取不到返回 null。 */
+private fun guidFromUrl(url: String): String? = GUID_IN_URL.find(url)?.value
+
+/** OAuth 隐式/查询串回跳里直接带 token 的情况：`#access_token=...` 与 `?access_token=...`。 */
+private fun tokenFromUrl(url: String): String? {
+    val marker = "access_token="
+    val at = url.indexOf(marker)
+    if (at < 0) return null
+    return url.substring(at + marker.length)
+        .substringBefore('&')
+        .substringBefore('#')
+        .takeIf { it.length > 40 }
+}
+
 /**
  * 云创登录结果：token 与用户 guid 由 WebView 抓取。
- * token 来源：登录完成后从 keycloak session cookie / localStorage 读取失败时，
- * 降级用「用户手动粘贴 token」输入框（Web 端 localStorage key: keycloak access_token）。
+ *
+ * token 首选来源是页面自身请求云创接口时的请求头 `access_token`——即便网页把 token 放在 HttpOnly cookie 里，
+ * JS 读不到，请求头里也一定是明文。抓不到时再退回 localStorage/sessionStorage 扫描与用户手动粘贴。
  */
 data class CloudAuthState(
     val token: String? = null,
@@ -59,7 +92,7 @@ data class CloudAuthState(
 )
 
 /**
- * Nikon ID 登录 WebView。登录完成后回跳云创页面，从 Cookie/localStorage 提取 token。
+ * Nikon ID 登录 WebView。登录完成后回跳云创页面，从接口请求头/localStorage 提取 token。
  * 授权码流程（redirect 到 app scheme）在本 App 未注册 URI scheme，故用登录站点内 token 提取。
  */
 @SuppressLint("SetJavaScriptEnabled")
@@ -75,20 +108,36 @@ fun CloudLoginScreen(
     var capturedToken by remember { mutableStateOf("") }
     var capturedGuid by remember { mutableStateOf("") }
     var showManual by remember { mutableStateOf(false) }
+    var tokenVisible by remember { mutableStateOf(false) }
     var completed by remember { mutableStateOf(false) }
 
-    /** 从 WebView 当前页提取 token；返回 null 表示未找到。 */
+    /** 收到 token 后统一入库；guid 只在还没有值时补写，避免被 URL 里别的 ULID 覆盖。 */
+    fun acceptToken(token: String?, guid: String?) {
+        val t = token?.trim().orEmpty()
+        if (t.length <= 40 || completed) return
+        if (capturedToken.isNotEmpty()) return
+        capturedToken = t
+        val g = guid?.trim().orEmpty()
+        if (g.isNotEmpty() && capturedGuid.isEmpty()) capturedGuid = g
+    }
+
+    /** 从 WebView 当前页提取 token；未命中时给出可操作提示（旧版静默无反馈）。 */
     fun extractFromPage() {
-        val view = webView ?: return
+        val view = webView ?: run {
+            Toast.makeText(context, "页面还没加载好", Toast.LENGTH_SHORT).show()
+            return
+        }
         view.evaluateJavascript(TOKEN_EXTRACT_JS) { value ->
-            val raw = value?.trim('"', ' ', '|') ?: return@evaluateJavascript
-            if (completed || raw.isEmpty()) return@evaluateJavascript
-            val tokenPart = raw.substringBefore('|')
-            val guidPart = raw.substringAfter('|', "")
-            if (tokenPart.length > 40) {
-                capturedToken = tokenPart
-                capturedGuid = guidPart
+            val raw = value?.trim('"', ' ', '|').orEmpty()
+            if (raw.isEmpty()) {
+                Toast.makeText(
+                    context,
+                    "页面里没有 token：请在网页中点开任意方案，让页面先发出一次接口请求",
+                    Toast.LENGTH_LONG,
+                ).show()
+                return@evaluateJavascript
             }
+            acceptToken(raw.substringBefore('|'), raw.substringAfter('|', ""))
         }
     }
 
@@ -124,7 +173,7 @@ fun CloudLoginScreen(
             OutlinedTextField(
                 value = manualGuid,
                 onValueChange = { manualGuid = it },
-                label = { Text("相机注册 ID（guid）") },
+                label = { Text("账号 guid（可留空，抓包 URL 里的 26 位 ULID）") },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 singleLine = true,
             )
@@ -138,78 +187,120 @@ fun CloudLoginScreen(
             ) { Text("使用该 token") }
         }
         if (capturedToken.isNotBlank()) {
-            Text("已捕获 access_token。登录页不会自动关闭，请复制令牌后返回使用。", Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-            OutlinedTextField(
-                value = capturedGuid,
-                onValueChange = { capturedGuid = it },
-                label = { Text("相机注册 ID（guid，可选）") },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                singleLine = true,
-            )
-            OutlinedTextField(
-                value = capturedToken,
-                onValueChange = {},
-                label = { Text("access_token") },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                readOnly = true,
-                minLines = 2,
-            )
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
-                    onClick = {
-                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        clipboard.setPrimaryClip(ClipData.newPlainText("access_token", capturedToken))
-                        Toast.makeText(context, "已复制到剪贴板", Toast.LENGTH_SHORT).show()
-                    },
-                    modifier = Modifier.weight(1f),
-                ) { Text("复制 token") }
-                Button(
-                    onClick = {
-                        completed = true
-                        onDone(CloudAuthState(token = capturedToken, guid = capturedGuid.ifBlank { null }))
-                    },
-                    modifier = Modifier.weight(1f),
-                ) { Text("返回 App") }
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            ) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("已捕获 access_token", style = MaterialTheme.typography.titleSmall)
+                    TextField(
+                        value = capturedToken,
+                        onValueChange = {},
+                        readOnly = true,
+                        singleLine = true,
+                        visualTransformation = if (tokenVisible) VisualTransformation.None
+                        else PasswordVisualTransformation(),
+                        textStyle = MaterialTheme.typography.bodySmall,
+                        trailingIcon = {
+                            TextButton(onClick = { tokenVisible = !tokenVisible }) {
+                                Text(if (tokenVisible) "隐藏" else "显示")
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = capturedGuid,
+                        onValueChange = { capturedGuid = it },
+                        label = { Text("账号 guid（可留空）") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = {
+                                val clipboard =
+                                    context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText("access_token", capturedToken))
+                                Toast.makeText(context, "已复制到剪贴板", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.weight(1f),
+                        ) { Text("复制 token") }
+                        Button(
+                            onClick = {
+                                completed = true
+                                onDone(
+                                    CloudAuthState(
+                                        token = capturedToken,
+                                        guid = capturedGuid.ifBlank { null },
+                                    ),
+                                )
+                            },
+                            modifier = Modifier.weight(1f),
+                        ) { Text("返回 App") }
+                    }
+                }
             }
         }
-        if (capturedToken.isBlank()) {
-            TextButton(
-                onClick = { extractFromPage() },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-            ) { Text("登录完成后点这里提取 token") }
-            AndroidView(
-                factory = { ctx ->
-                    WebView(ctx).apply {
-                        settings.javaScriptEnabled = true
-                        settings.domStorageEnabled = true
-                        webView = this
-                        webViewClient = object : WebViewClient() {
-                            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean = false
-                            override fun onPageFinished(view: WebView?, url: String?) {
-                                super.onPageFinished(view, url)
-                                // 登录跳转完成后自动提取一次；未命中时用户可点上方按钮手动提取
-                                view?.evaluateJavascript(TOKEN_EXTRACT_JS) { value ->
-                                    val raw = value?.trim('"', ' ', '|') ?: return@evaluateJavascript
-                                    if (completed || raw.isEmpty()) return@evaluateJavascript
-                                    val tokenPart = raw.substringBefore('|')
-                                    if (tokenPart.length > 40) {
-                                        capturedToken = tokenPart
-                                        capturedGuid = raw.substringAfter('|', "")
-                                    }
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "登录后需在网页里点开任意方案（触发一次接口请求）才能抓到 token。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = { extractFromPage() }) { Text("提取 token") }
+        }
+        AndroidView(
+            factory = { ctx ->
+                WebView(ctx).apply {
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = true
+                    settings.databaseEnabled = true
+                    webView = this
+                    webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(
+                            view: WebView?,
+                            request: WebResourceRequest?,
+                        ): Boolean = false
+
+                        /** 只要页面自身调了云创接口，请求头里就带着 access_token——这里是最可靠的抓取点。 */
+                        override fun shouldInterceptRequest(
+                            view: WebView?,
+                            request: WebResourceRequest?,
+                        ): WebResourceResponse? {
+                            val token = tokenFromHeaders(request?.requestHeaders)
+                            if (token != null) {
+                                val guid = request?.url?.toString()?.let(::guidFromUrl)
+                                view?.post { acceptToken(token, guid) }
+                            }
+                            return null
+                        }
+
+                        override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                            super.onPageStarted(view, url, favicon)
+                            val direct = url?.let(::tokenFromUrl)
+                            if (direct != null) view?.post { acceptToken(direct, null) }
+                        }
+
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            super.onPageFinished(view, url)
+                            // 兼容 token 落在 localStorage 里的情况；未命中时用户可点上方「提取 token」。
+                            view?.evaluateJavascript(TOKEN_EXTRACT_JS) { value ->
+                                val raw = value?.trim('"', ' ', '|').orEmpty()
+                                if (raw.isEmpty()) return@evaluateJavascript
+                                view.post {
+                                    acceptToken(raw.substringBefore('|'), raw.substringAfter('|', ""))
                                 }
                             }
                         }
-                        loadUrl("https://imagingcloud.nikon.com.cn/recipe/index/")
                     }
-                },
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-            )
-        }
-        Text(
-            "登录完成后：页面会自动提取 token；若未出现，点“提取 token”按钮或用“手动输入”粘贴。",
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.padding(12.dp),
+                    loadUrl("https://imagingcloud.nikon.com.cn/recipe/index/")
+                }
+            },
+            modifier = Modifier.weight(1f).fillMaxWidth(),
         )
     }
 }
-

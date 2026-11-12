@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
@@ -49,6 +50,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -84,6 +86,9 @@ internal fun CloudTab(
     val model: CloudCatalogViewModel = viewModel()
     val catalog by model.state.collectAsStateWithLifecycle()
     var showLogin by rememberSaveable { mutableStateOf(false) }
+    // 用普通 remember（非 rememberSaveable）持有网格滚动状态：进出云创 tab 必从第一条开始，
+    // 而查看详情再返回列表时仍保留原位置（CloudTab 未离开组合）。
+    val gridState = remember { LazyGridState() }
 
     if (showLogin) {
         CloudLoginScreen(
@@ -122,6 +127,7 @@ internal fun CloudTab(
 
         else -> CloudBrowseContent(
             state = catalog,
+            gridState = gridState,
             loggedIn = cloudToken != null,
             onRefresh = model::refresh,
             onQuery = model::setQuery,
@@ -138,6 +144,7 @@ internal fun CloudTab(
 @Composable
 private fun CloudBrowseContent(
     state: CloudCatalogState,
+    gridState: LazyGridState,
     loggedIn: Boolean,
     onRefresh: () -> Unit,
     onQuery: (String) -> Unit,
@@ -291,6 +298,7 @@ private fun CloudBrowseContent(
                     if (state.recipes.isEmpty()) "检查网络后下拉刷新" else "换个关键词，或清空筛选条件",
                 )
                 else -> LazyVerticalGrid(
+                    state = gridState,
                     columns = GridCells.Fixed(2),
                     contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 28.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
