@@ -72,6 +72,17 @@ private val TOKEN_EXTRACT_JS = """
 })()
 """.trimIndent()
 
+/**
+ * 可信域：只有尼康自己的页面/接口才允许贡献 token 与 guid。
+ * 登录链路会经过 auth.accounts.cld.nikon.com.cn、imagingcloud.nikon.com.cn 等，均以 nikon.com.cn 结尾。
+ */
+private val TRUSTED_HOST_SUFFIXES = listOf("nikon.com.cn", "nikon.com", "nikonimaging.com")
+
+private fun isTrustedUri(uri: String?): Boolean {
+    val host = runCatching { java.net.URI(uri.orEmpty()).host }.getOrNull() ?: return false
+    return TRUSTED_HOST_SUFFIXES.any { host == it || host.endsWith(".$it") }
+}
+
 /** 从请求头里取云创 token：优先 `access_token`，其次 `Authorization: Bearer`。 */
 private fun tokenFromHeaders(headers: Map<String, String>?): String? {
     if (headers.isNullOrEmpty()) return null
@@ -301,7 +312,16 @@ fun CloudLoginScreen(
                         override fun shouldOverrideUrlLoading(
                             view: WebView?,
                             request: WebResourceRequest?,
-                        ): Boolean = false
+                        ): Boolean {
+                            val uri = request?.url ?: return false
+                            val scheme = uri.scheme.orEmpty().lowercase()
+                            // 自定义 scheme（含 App 自己的回调）不在 WebView 里处理，避免任意 intent 被页面触发
+                            if (scheme != "https" && scheme != "http") return true
+                            if (isTrustedUri(uri.toString())) return false
+                            // 尼康域名之外的链接交给系统浏览器，不在承载登录态的 WebView 里打开
+                            runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri)) }
+                            return true
+                        }
 
                         /** 只要页面自身调了云创接口，请求头里就带着 access_token——这里是最可靠的抓取点。 */
                         override fun shouldInterceptRequest(
@@ -310,6 +330,8 @@ fun CloudLoginScreen(
                         ): WebResourceResponse? {
                             val headers = request?.requestHeaders
                             val url = request?.url?.toString().orEmpty()
+                            // 非尼康域名的请求一律不参与凭据捕获（防第三方页面塞 token/guid）
+                            if (!isTrustedUri(url)) return null
                             val token = tokenFromHeaders(headers)
                             if (token != null) {
                                 val guid = guidFromHeaders(headers) ?: guidFromUrl(url)
@@ -324,7 +346,7 @@ fun CloudLoginScreen(
 
                         override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                             super.onPageStarted(view, url, favicon)
-                            val direct = url?.let(::tokenFromUrl)
+                            val direct = url?.takeIf(::isTrustedUri)?.let(::tokenFromUrl)
                             if (direct != null) view?.post { acceptToken(direct, null) }
                         }
 

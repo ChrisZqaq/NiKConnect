@@ -3,6 +3,7 @@ package com.chrisz.nikconnect.cloud
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
 /** 已注册到云创账号的相机。 */
@@ -40,7 +41,7 @@ internal class CloudAccountClient(
     private val accessToken: String,
     private val guid: String,
     private val country: String = "CN",
-    private val http: CloudHttp = CloudHttp(),
+    private val http: CloudHttp = CloudHttp.shared,
 ) {
     private val bearer = mapOf("Authorization" to "Bearer $accessToken")
 
@@ -70,7 +71,7 @@ internal class CloudAccountClient(
         val element = http.parseElement(raw, "IF_IR_R_C001")
         val arr = http.findObjectArray(element, CAMERA_KEYS, mustHave = "id")
             ?: http.findObjectArray(element, CAMERA_KEYS, mustHave = "cameraId")
-            ?: return emptyList()
+            ?: emptyArrayOrFail(element, raw, "IF_IR_R_C001", "相机列表")
         return arr.mapNotNull { el ->
             val o = el as? JsonObject ?: return@mapNotNull null
             val id = o.str("id") ?: o.str("cameraId") ?: return@mapNotNull null
@@ -87,7 +88,7 @@ internal class CloudAccountClient(
         val arr = http.findObjectArray(element, SLOT_KEYS, mustHave = "pictureControlName")
             ?: http.findObjectArray(element, SLOT_KEYS, mustHave = "exist")
             ?: http.findObjectArray(element, SLOT_KEYS, mustHave = "id")
-            ?: return emptyList()
+            ?: emptyArrayOrFail(element, raw, "IF_IR_R_C002", "槽位")
         return arr.mapIndexedNotNull { index, el ->
             val o = el as? JsonObject ?: return@mapIndexedNotNull null
             // 槽位号以数组顺序为准（Web 端把数组顺序直接当槽位）；若响应自带 slot/slotNum 则优先用
@@ -106,7 +107,8 @@ internal class CloudAccountClient(
 
     fun parseAssignable(raw: String): List<CloudRecipe> {
         val element = http.parseElement(raw, "IF_FR100_H13")
-        val arr: JsonArray = http.findObjectArray(element, ASSIGNABLE_KEYS, mustHave = "id") ?: return emptyList()
+        val arr: JsonArray = http.findObjectArray(element, ASSIGNABLE_KEYS, mustHave = "id")
+            ?: emptyArrayOrFail(element, raw, "IF_FR100_H13", "可分配方案")
         return arr.mapNotNull { el ->
             val o = el as? JsonObject ?: return@mapNotNull null
             val id = o.str("id") ?: return@mapNotNull null
@@ -121,6 +123,33 @@ internal class CloudAccountClient(
                 likes = (o["like"] as? JsonObject)?.int("num") ?: 0,
             )
         }
+    }
+
+    /**
+     * 找不到对象数组时区分两种情形：
+     * 1) 响应本身就是空数组/空列表 → 真的没有数据，返回空；
+     * 2) 其它形状 → 结构变了或解析规则不对，抛错并带原始片段，别把「不认识」说成「账号是空的」。
+     */
+    private fun emptyArrayOrFail(
+        element: JsonElement,
+        raw: String,
+        callId: String,
+        what: String,
+    ): JsonArray {
+        val definitelyEmpty = when (element) {
+            is JsonArray -> element.isEmpty()
+            is JsonObject -> element.isEmpty() ||
+                element.values.all { value ->
+                    (value is JsonArray && value.isEmpty()) || (value is JsonObject && value.isEmpty())
+                }
+            else -> false
+        }
+        if (definitelyEmpty) return JsonArray(emptyList())
+        throw CloudException(
+            "$callId 返回的$what 结构无法识别（${raw.length} 字节）：${raw.take(160)}",
+            errorCode = "",
+            httpStatus = -2,
+        )
     }
 
     private fun firstNonBlank(o: JsonObject, vararg keys: String): String? =

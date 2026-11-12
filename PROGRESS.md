@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-- **版本**：0.6.1-alpha（云创账号批次 1：相机列表与 9 个云创槽位只读查看；修正账号 guid 提取规则——0.6.0 把方案 ID 当账号 ID 导致 `IF_IR_R_C001` 422；JVM 60 项测试通过，真机待验）
+- **版本**：0.6.2-alpha（按 2026-11-13 全项目评审报告修 A 批可靠性问题：云创单飞与业务频控退避、断线不再清空云创身份、下载分块级取消、唤醒锁释放、槽位迟到结果保护、WebView 凭据来源白名单、图库翻页保选与筛选内全选、导航常驻、封面缓存预算；JVM 66 项测试通过，真机待验）
 - **真机基线**：一加 Ace 5 Pro + Nikon Zf
 - **未关闭验证**：0.4 RAW 哈希/分块对照；0.5 遗留三项（在线刷新频控、详情参数与官网逐项对照、蜂窝网络封面流量）；0.6 相机列表与槽位接口的响应形状（真机未验，解析按特征嗅探 + 原始响应可截图）；0.6 批次 2（拖拽排布、收藏到书）未开工
 
@@ -283,6 +283,43 @@
   - `CloudAccountViewModel` 逐候选试：先用手上 guid，失败再试 token 里 JWT claim 的值；只有 400/401/403/422 才换候选（频控与网络问题换 guid 无意义）。成功后把生效的 guid 写回 state 供后续槽位接口使用。
   - 账号页新增「重新获取账号 ID」：422/无 guid 时出现，点了直接打开网页 `https://imagingcloud.nikon.com.cn/recipe/camera`——该页自己会发 `IF_IR_R_C001`，`shouldInterceptRequest` 从请求 URL 读到真实 guid，不用用户手动抄。
 - **测试**：新增 `app/src/test/java/com/chrisz/nikconnect/cloud/CloudIdentifiersTest.kt` 6 项，其中一条专门锁死「方案详情地址不得泄漏方案 ID」。
+
+## 2026-11-13 · 0.6.2：按全项目评审报告修 A 批（可靠性）
+
+评审报告见 [docs/NiKConnect_全项目评审与重构决策_2026-11-13.md](docs/NiKConnect_全项目评审与重构决策_2026-11-13.md)。逐条核对源码后，**认定 12 条成立并已修**，其余记为"认同但本批不做"（见文末）。
+
+**云创请求治理**
+- `CloudHttp.send()` 原来只在算间隔时持锁，释放锁后才发 HTTP → 慢请求与后续请求重叠。改为 gate 覆盖「等间隔 + 发请求 + 读响应」整段，进程内单飞；间隔用 `System.nanoTime()` 单调时钟。
+- `E01_0701` 是 **HTTP 200 响应体里的业务码**，原实现的退避只包住 `send()`，编码在 `parseElement()` 里，等于没退避。新增 `businessErrorCode(raw)` 纯函数，在 `request()` 里先判业务码再返回，频控退避才真正生效。
+- 新增 `CloudHttp.shared`：目录客户端、账号客户端默认共用同一实例——"同名类"不等于"同一调度器"。
+
+**状态与任务边界**
+- `MainViewModel.disconnect()` 原来 `_state.value = UiState()`，把云创 token/guid、图库视图档位一起清掉。改为只重置相机会话相关字段，保留 `cloudToken`/`cloudGuid`/`galleryViewTier`（传输页选中态退回照片页）。
+- `CloudAccountViewModel` 的 token 从构造期不可变字段改为可变 `accessToken`，新增 `updateCredentials()`；`CloudAccountScreen` 用 `LaunchedEffect(token, guid)` 下发新凭据。同 guid 重新登录后不会继续用旧 token。
+- 槽位请求加代次 `slotRequestId`：切相机、返回列表、重登都让旧响应失效，迟到响应不再回填。
+
+**取消与唤醒锁**
+- `PtpIpClient.copyObject()` 改为 `suspend`，每块请求前 `ensureActive()`——整块事务已完整收完才退出，不会在 TCP 流里留半个事务。
+- `PhotoDownloader` 在发布相册前再检查一次取消。
+- 唤醒锁：`finally` 里原来按"队列还有没有活动任务"判断，而任务终态是 `execute` 返回后才写入 → 必然漏释放。改为无条件 `releaseWakeLock()`，下一任务自己重新 acquire。
+
+**体验确定性**
+- 底部导航三个入口常驻；`传输` 页与连接状态解耦，断线后仍能看到已完成/失败结果与原因（原来断线直接变回连接页）。
+- 图库选择集改用 `listSaver` 且不再以「当前页句柄列表」为 key：翻页加载更多不再清空已选。
+- 「全选」改为只作用于**当前筛选下可见**的 JPEG/RAW（原来 JPEG 视图会把隐藏的 RAW 也选上），「下载所选」同样按筛选过滤。
+- 云创封面缓存：key 改为「去掉签名查询串的地址」（签名每小时轮换不再无限堆文件），加 200 文件 / 120MB 上限 + 按访问时间淘汰 + 单张 8MB 下载上限。
+
+**凭据与响应契约**
+- `CloudLoginScreen` 增加可信域白名单（`nikon.com.cn`/`nikon.com`/`nikonimaging.com`）：非尼康域的请求头、URL、页面存储一律不参与 token/guid 捕获；非 http(s) scheme 不加载，域外链接交系统浏览器。
+- `CloudAccountClient` 的解析不再"认不出来就当空账号"：`emptyArrayOrFail()` 区分「真的空列表」与「结构变了」，后者抛 `CloudException(httpStatus = -2)` 并带原始片段。
+- 账号页文案由「App 只负责排布」改为「本页当前只做只读查看，排布写入在后续批次」。
+
+**本批不做（附理由）**
+- 拆 `CameraSessionOwner`/`CloudRepository` 大结构：认同方向，但属纯结构重构，会牵动 PTP 会话、队列、保活服务三处，必须单独一批 + 真机回归，混在本批会把可靠性修复的验证信号冲掉。
+- 文件名当已下载身份：需要新增「来源元数据 + 本地 URI」数据模型（含 MediaStore 迁移），属 0.7 功能项，本批只记录不改。
+- 删除 `np3/` 与 B0 探针：当前零业务调用、零运行时开销、测试全绿；它是研究资产，删不删由产品决定，不擅自删。
+- 事务级累计上限、START_DATA 阶段顺序校验：需要先补协议层测试夹具，否则改协议代码没有验证手段。
+- 分页句柄快照：现有 offset 分页在"传输中相机新增文件"下可能重复，但改成快照要引入失效时机（刷新/重连/拍摄完成），本批不引入新状态。
 
 ## 开放问题
 

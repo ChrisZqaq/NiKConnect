@@ -64,6 +64,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -139,20 +140,19 @@ private fun NiKConnectContent(
         },
         bottomBar = {
             NavigationBar {
-                if (connected) {
-                    NavigationBarItem(
-                        selected = state.selectedTab == 0,
-                        onClick = { onTab(0) },
-                        icon = { Icon(Icons.Default.PhotoLibrary, contentDescription = null) },
-                        label = { Text("照片") },
-                    )
-                    NavigationBarItem(
-                        selected = state.selectedTab == 1,
-                        onClick = { onTab(1) },
-                        icon = { Icon(Icons.Default.Download, contentDescription = null) },
-                        label = { Text("传输") },
-                    )
-                }
+                // 三个入口常驻：断线时「传输」仍要能看到已完成/失败的结果与原因，不该因为断开就消失。
+                NavigationBarItem(
+                    selected = state.selectedTab == 0,
+                    onClick = { onTab(0) },
+                    icon = { Icon(Icons.Default.PhotoLibrary, contentDescription = null) },
+                    label = { Text("照片") },
+                )
+                NavigationBarItem(
+                    selected = state.selectedTab == 1,
+                    onClick = { onTab(1) },
+                    icon = { Icon(Icons.Default.Download, contentDescription = null) },
+                    label = { Text("传输") },
+                )
                 NavigationBarItem(
                     selected = state.selectedTab == 2,
                     onClick = { onTab(2) },
@@ -163,16 +163,17 @@ private fun NiKConnectContent(
         },
     ) { padding ->
         Box(modifier = Modifier.padding(padding).fillMaxSize()) {
-            if (!connected && state.selectedTab != 2) {
-                ConnectionScreen(state, onConnect)
-            } else if (!connected && state.selectedTab == 2) {
-                CloudTab(cloudToken = state.cloudToken, cloudGuid = state.cloudGuid, onLogin = onCloudLogin, onLogout = onCloudLogout)
-            } else if (state.selectedTab == 0) {
-                GalleryScreen(state, onDownload, onDownloadAll, onLoadMore, onViewTier, thumbnailLoader)
-            } else if (state.selectedTab == 1) {
-                TransferScreen(state, onRetryDownload, onCancelDownload)
-            } else {
-                CloudTab(cloudToken = state.cloudToken, cloudGuid = state.cloudGuid, onLogin = onCloudLogin, onLogout = onCloudLogout)
+            when {
+                state.selectedTab == 2 -> CloudTab(
+                    cloudToken = state.cloudToken,
+                    cloudGuid = state.cloudGuid,
+                    onLogin = onCloudLogin,
+                    onLogout = onCloudLogout,
+                )
+                // 传输页与连接状态解耦：断线后仍可查看结果、失败原因与重试入口
+                state.selectedTab == 1 -> TransferScreen(state, onRetryDownload, onCancelDownload)
+                connected -> GalleryScreen(state, onDownload, onDownloadAll, onLoadMore, onViewTier, thumbnailLoader)
+                else -> ConnectionScreen(state, onConnect)
             }
         }
     }
@@ -301,9 +302,13 @@ private fun GalleryScreen(
             .filter { it.filename in state.downloadedFilenames }
             .map { it.handle }
     val viewMinSize = listOf(168.dp, 96.dp, 64.dp)[viewTier]
-    val selected = rememberSaveable(state.photos.map { it.handle }) {
-        mutableStateOf(setOf<Long>())
-    }
+    // 选择集与会话绑定，不随「当前页句柄列表」变化而清空（翻页加载更多不该丢选中）
+    val selected = rememberSaveable(
+        saver = listSaver(
+            save = { it.value.toList() },
+            restore = { mutableStateOf(it.toSet()) },
+        ),
+    ) { mutableStateOf(setOf<Long>()) }
     fun exitSelection() {
         selectionMode = false
         selected.value = emptySet()
@@ -424,7 +429,8 @@ private fun GalleryScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            val downloadable = state.photos.filter { it.isJpeg || it.isRaw }
+                            // 只对「当前筛选下可见的」照片全选，避免 JPEG 视图里把隐藏的 RAW 也选中
+                            val downloadable = filteredPhotos.filter { it.isJpeg || it.isRaw }
                             val allSelected = downloadable.isNotEmpty() &&
                                 downloadable.all { it.handle in selected.value }
                             TextButton(onClick = {
@@ -438,7 +444,7 @@ private fun GalleryScreen(
                             }
                             Button(
                                 onClick = {
-                                    onDownloadAll(state.photos.filter { it.handle in selected.value })
+                                    onDownloadAll(filteredPhotos.filter { it.handle in selected.value })
                                     exitSelection()
                                 },
                                 enabled = selected.value.isNotEmpty(),

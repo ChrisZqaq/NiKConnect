@@ -37,9 +37,15 @@ internal data class CloudAccountState(
 }
 
 internal class CloudAccountViewModel(
-    private val token: String,
+    token: String,
     guid: String?,
 ) : ViewModel() {
+    /** token 会被重新登录替换：不能做成构造时不可变的字段，否则同 guid 换号后还在用旧凭据。 */
+    private var accessToken: String = token
+
+    /** 槽位请求代次：切换相机/返回列表/重登都会让旧响应失效。 */
+    private var slotRequestId = 0
+
     private val _state = MutableStateFlow(CloudAccountState(guid = guid))
     val state: StateFlow<CloudAccountState> = _state.asStateFlow()
 
@@ -51,7 +57,7 @@ internal class CloudAccountViewModel(
     }
 
     fun refreshCameras() {
-        val candidates = guidCandidates(token, workingGuid ?: _state.value.guid)
+        val candidates = guidCandidates(accessToken, workingGuid ?: _state.value.guid)
         if (candidates.isEmpty()) {
             _state.update {
                 it.copy(cameraError = "没有拿到账号 guid（登录后自动捕获）。点右上角刷新，或用「重新获取账号 ID」在网页里打开相机页。", needsGuidRefresh = true)
@@ -63,7 +69,7 @@ internal class CloudAccountViewModel(
         viewModelScope.launch {
             var lastError: CloudException? = null
             for (guid in candidates) {
-                val client = CloudAccountClient(accessToken = token, guid = guid)
+                val client = CloudAccountClient(accessToken = accessToken, guid = guid)
                 try {
                     val cameras = client.listCameras()
                     workingGuid = guid
@@ -112,11 +118,14 @@ internal class CloudAccountViewModel(
 
     fun openCamera(camera: CloudCamera) {
         val guid = workingGuid ?: _state.value.guid ?: return
+        val requestId = ++slotRequestId
         _state.update { it.copy(selected = camera, slots = emptyList(), slotsError = null, loadingSlots = true) }
         viewModelScope.launch {
-            val client = CloudAccountClient(accessToken = token, guid = guid)
+            val client = CloudAccountClient(accessToken = accessToken, guid = guid)
             try {
                 val slots = client.cameraSlots(camera.id)
+                // 迟到结果保护：期间切了相机/返回列表/换了账号，就丢弃这次响应
+                if (requestId != slotRequestId || _state.value.selected?.id != camera.id) return@launch
                 _state.update {
                     it.copy(
                         slots = slots,
@@ -125,6 +134,7 @@ internal class CloudAccountViewModel(
                     )
                 }
             } catch (e: CloudException) {
+                if (requestId != slotRequestId) return@launch
                 _state.update {
                     it.copy(
                         loadingSlots = false,
@@ -137,8 +147,21 @@ internal class CloudAccountViewModel(
         }
     }
 
+    /** 重新登录后调用：token 变了就丢掉旧数据重新拉，旧响应因代次变化自动失效。 */
+    fun updateCredentials(token: String?, guid: String?) {
+        val next = token?.trim().orEmpty()
+        val guidChanged = guid != null && guid != _state.value.guid
+        if (next.isEmpty() || (next == accessToken && !guidChanged)) return
+        accessToken = next
+        workingGuid = guid?.takeIf { it.isNotBlank() }
+        slotRequestId++
+        _state.value = CloudAccountState(guid = guid ?: _state.value.guid)
+        refreshCameras()
+    }
+
     fun backToList() {
-        _state.update { it.copy(selected = null, slots = emptyList(), slotsError = null) }
+        slotRequestId++
+        _state.update { it.copy(selected = null, slots = emptyList(), slotsError = null, loadingSlots = false) }
     }
 
     private fun describe(e: CloudException, callId: String): String = when {

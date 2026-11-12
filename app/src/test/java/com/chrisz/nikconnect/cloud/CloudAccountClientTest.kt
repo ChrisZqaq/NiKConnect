@@ -2,6 +2,7 @@ package com.chrisz.nikconnect.cloud
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -43,9 +44,19 @@ class CloudAccountClientTest {
     }
 
     @Test
-    fun `camera list empty when shape unknown`() {
+    fun `empty account yields empty list`() {
         assertTrue(client().parseCameras("""{"statusCode":200,"body":{}}""").isEmpty())
-        assertTrue(client().parseCameras("""{"statusCode":200,"body":{"note":"nothing here"}}""").isEmpty())
+        assertTrue(client().parseCameras("""{"statusCode":200,"body":[]}""").isEmpty())
+        assertTrue(client().parseCameras("""{"statusCode":200,"body":{"cameraList":[]}}""").isEmpty())
+    }
+
+    @Test
+    fun `unknown shape is an error not an empty account`() {
+        // 回归：以前把「结构不认识」当成「账号下没有相机」，用户看到的是错误的空态
+        val e = assertThrows(CloudException::class.java) {
+            client().parseCameras("""{"statusCode":200,"body":{"note":"nothing here"}}""")
+        }
+        assertTrue(e.message.orEmpty().contains("结构无法识别"))
     }
 
     // ---- 槽位 ----

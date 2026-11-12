@@ -96,7 +96,9 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
                 val downloader = checkNotNull(downloader) { "相机已断开，请重新连接" }
                 downloader.download(photo, onProgress).toString()
             } finally {
-                maybeReleaseWakeLock()
+                // 任务终态是在 execute 返回之后才写入的，按"队列还有没有活动任务"判断必然漏释放：
+                // 这里无条件释放，下一个任务自己会重新 acquire。
+                releaseWakeLock()
             }
         },
         onError = { error ->
@@ -285,9 +287,8 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         if (!wakeLock.isHeld) wakeLock.acquire(30 * 60 * 1000L)  // 最长 30 分钟防泄漏
     }
 
-    private fun maybeReleaseWakeLock() {
-        val active = downloadQueue.tasks.value.any { it.status == QueueStatus.WAITING || it.status == QueueStatus.RUNNING }
-        if (!active && wakeLock.isHeld) wakeLock.release()
+    private fun releaseWakeLock() {
+        if (wakeLock.isHeld) runCatching { wakeLock.release() }
     }
 
     fun download(photo: PhotoObject) {
@@ -369,7 +370,16 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         _queueTasks.value = emptyList()
         repository.close()
         ConnectionKeeperService.stop(getApplication())
-        _state.value = UiState()
+        // 只重置「相机会话」相关字段：云创身份与本机偏好跟相机连接无关，
+        // 断线不该把账号登出、也不该把图库视图档位打回去。
+        _state.update {
+            UiState(
+                cloudToken = it.cloudToken,
+                cloudGuid = it.cloudGuid,
+                galleryViewTier = it.galleryViewTier,
+                selectedTab = if (it.selectedTab == 1) 0 else it.selectedTab,
+            )
+        }
     }
 
     private fun invalidateSession(): Long {

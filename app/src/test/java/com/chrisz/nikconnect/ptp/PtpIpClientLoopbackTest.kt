@@ -49,9 +49,11 @@ class PtpIpClientLoopbackTest {
 
             val photo = PhotoObject(7, 1, 0x3801, 10, "DSC_0007.JPG", "", 0)
             val chunks = mutableListOf<ByteArray>()
-            client.copyObject(photo, startOffset = 4) { offset, data ->
-                assertEquals(4, offset)
-                chunks += data
+            kotlinx.coroutines.runBlocking {
+                client.copyObject(photo, startOffset = 4) { offset, data ->
+                    assertEquals(4, offset)
+                    chunks += data
+                }
             }
             assertArrayEquals("efghij".toByteArray(), chunks.single())
             val fired = java.util.concurrent.atomic.AtomicBoolean(false)

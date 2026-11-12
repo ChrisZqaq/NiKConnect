@@ -29,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,6 +63,9 @@ internal fun CloudAccountScreen(
     }
     val model: CloudAccountViewModel = viewModel(key = "cloud-account-$guid", factory = factory)
     val state by model.state.collectAsStateWithLifecycle()
+
+    // 同一个 guid 重新登录后 token 会变：把新凭据交给已有 ViewModel，旧请求随代次变化失效。
+    LaunchedEffect(token, guid) { model.updateCredentials(token, guid) }
 
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -191,7 +195,7 @@ private fun CameraSection(
         state.rawSnippet?.let { RawSnippet(it) }
 
         Text(
-            "说明：云创方案占相机内的 9 个云创槽位（独立存储区），不是机身菜单的 C-1…C-9。方案由相机自己联网拉取，App 只负责排布。",
+            "说明：云创方案占相机内的 9 个云创槽位（独立存储区），不是机身菜单的 C-1…C-9。方案由相机自己联网拉取；本页当前只做只读查看，排布写入在后续批次实现。",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -199,7 +203,7 @@ private fun CameraSection(
         Spacer(Modifier.height(4.dp))
         TextButton(onClick = onLogout, modifier = Modifier.heightIn(min = 48.dp)) { Text("退出云创账号") }
         TextButton(onClick = {}, enabled = false, modifier = Modifier.heightIn(min = 48.dp)) {
-            Text("批次 2：拖拽排布与收藏（待槽位接口核验）")
+            Text("拖拽排布与收藏：后续批次")
         }
     }
 }

@@ -36,14 +36,37 @@ internal object CloudImageLoader {
         withContext(Dispatchers.IO) {
             memory.get(url)?.let { return@withContext it }
             val dir = File(context.cacheDir, "cloud_covers").apply { mkdirs() }
-            val file = File(dir, sha256(url) + ".jpg")
+            // 云创封面是带签名的 URL，签名每分钟变；按「去掉查询串的地址」做 key，签名轮换不会无限堆缓存
+            val file = File(dir, sha256(url.substringBefore('?')) + ".jpg")
             val bytes = if (file.isFile && file.length() > 0) {
-                file.readBytes()
+                runCatching { file.readBytes() }.getOrNull()
             } else {
-                download(url)?.also { raw -> runCatching { file.writeBytes(raw) } }
+                download(url)?.also { raw ->
+                    runCatching { file.writeBytes(raw) }
+                    prune(dir)
+                }
             } ?: return@withContext null
-            decode(bytes, maxWidth)?.also { memory.put(url, it) }
+            decode(bytes, maxWidth)?.also {
+                memory.put(url, it)
+                runCatching { file.setLastModified(System.currentTimeMillis()) }
+            }
         }
+
+    /** 磁盘缓存上限：200 个文件 / 120MB，超了按访问时间淘汰最旧的。 */
+    private fun prune(dir: File) {
+        val files = dir.listFiles()?.filter { it.isFile } ?: return
+        if (files.size <= MAX_FILES && files.sumOf { it.length() } <= MAX_BYTES) return
+        files.sortedBy { it.lastModified() }
+            .dropLast(MAX_FILES)
+            .forEach { runCatching { it.delete() } }
+        var total = dir.listFiles()?.filter { it.isFile }?.sumOf { it.length() } ?: return
+        if (total <= MAX_BYTES) return
+        dir.listFiles()?.filter { it.isFile }?.sortedBy { it.lastModified() }?.forEach { old ->
+            if (total <= MAX_BYTES) return
+            val size = old.length()
+            if (runCatching { old.delete() }.getOrDefault(false)) total -= size
+        }
+    }
 
     private fun download(url: String): ByteArray? = runCatching {
         val conn = URL(url).openConnection() as HttpURLConnection
@@ -53,7 +76,19 @@ internal object CloudImageLoader {
             conn.setRequestProperty("User-Agent", "NiKConnect/0.5 (Android)")
             val code = conn.responseCode
             if (code !in 200..299) return null
-            conn.inputStream.use { it.readBytes() }
+            val declared = conn.contentLengthLong
+            if (declared > MAX_DOWNLOAD_BYTES) return null
+            conn.inputStream.use { input ->
+                val buffer = java.io.ByteArrayOutputStream()
+                val chunk = ByteArray(64 * 1024)
+                while (true) {
+                    val read = input.read(chunk)
+                    if (read <= 0) break
+                    buffer.write(chunk, 0, read)
+                    if (buffer.size() > MAX_DOWNLOAD_BYTES) return null
+                }
+                buffer.toByteArray()
+            }
         } finally {
             conn.disconnect()
         }
@@ -67,6 +102,10 @@ internal object CloudImageLoader {
         val opts = BitmapFactory.Options().apply { inSampleSize = sample }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
     }.getOrNull()
+
+    private const val MAX_FILES = 200
+    private const val MAX_BYTES = 120L * 1024 * 1024
+    private const val MAX_DOWNLOAD_BYTES = 8L * 1024 * 1024
 
     private fun sha256(text: String): String =
         MessageDigest.getInstance("SHA-256").digest(text.toByteArray())

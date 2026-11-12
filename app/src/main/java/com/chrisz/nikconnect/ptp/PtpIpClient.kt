@@ -4,6 +4,8 @@ import android.util.Log
 import java.io.ByteArrayOutputStream
 import java.io.Closeable
 import java.io.IOException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.Socket
@@ -177,13 +179,15 @@ internal class PtpIpClient(
     @Synchronized
     fun readPropValue(propCode: Int): ProbeResult = probeCommand(OpCode.GET_DEVICE_PROP_VALUE, listOf(propCode.toLong() and 0xffffL))
 
-    fun copyObject(
+    suspend fun copyObject(
         photo: PhotoObject,
         startOffset: Long,
         onChunk: (offset: Long, data: ByteArray) -> Unit,
     ) {
         var offset = startOffset
         while (offset < photo.size) {
+            // 每块开始前检查取消：整块事务已经完整收完，中途退出不会在 TCP 流里留下半个事务。
+            currentCoroutineContext().ensureActive()
             val wanted = minOf(CHUNK_SIZE.toLong(), photo.size - offset)
             val result = checked(
                 transaction(OpCode.GET_PARTIAL_OBJECT, listOf(photo.handle, offset, wanted)),

@@ -39,6 +39,7 @@ internal class PhotoDownloader(
                     onProgress(offset + data.size)
                 }
             }
+            currentCoroutineContext().ensureActive()
             if (part.length() != photo.size) {
                 throw IOException("文件长度不完整，已保留 ${part.length()} 字节断点")
             }

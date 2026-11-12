@@ -45,9 +45,10 @@ internal class CloudHttp(
     private val minIntervalMillis: Long = 1_200,
     private val sleep: suspend (Long) -> Unit = { delay(it) },
 ) {
+
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val gate = Mutex()
-    private var lastRequestAt = 0L
+    private var lastRequestAt = Long.MIN_VALUE / 2
 
     suspend fun get(url: String, headers: Map<String, String>, callId: String): String =
         request("GET", url, null, headers, callId)
@@ -55,7 +56,12 @@ internal class CloudHttp(
     suspend fun post(url: String, body: String?, headers: Map<String, String>, callId: String): String =
         request("POST", url, body, headers, callId)
 
-    /** 发送并在频控时退避重试；其它错误码立即抛出。 */
+    /**
+     * 发送并在频控时退避重试；其它错误码立即抛出。
+     *
+     * 关键：业务频控码 `E01_0701` 是 **HTTP 200** 里返回的，属于"响应体里的错误"，
+     * 所以退避必须包住「取响应 + 判业务码」整段，只重试 `send()` 是漏的。
+     */
     suspend fun request(
         method: String,
         url: String,
@@ -67,12 +73,26 @@ internal class CloudHttp(
         while (true) {
             attempt++
             try {
-                return send(method, url, body, headers, callId)
+                val raw = send(method, url, body, headers, callId)
+                val code = businessErrorCode(raw)
+                if (code.isNotBlank()) throw CloudException("$callId 返回错误码 $code", errorCode = code)
+                return raw
             } catch (e: CloudException) {
                 if (e.errorCode != RATE_LIMITED_CODE || attempt >= MAX_ATTEMPTS) throw e
+                // 退避时让出 gate：频控是服务端侧冷却，不是我们自己的节奏问题
                 sleep(3_000L * attempt)
             }
         }
+    }
+
+    /** 纯函数：从原始响应里读业务错误码（顶层或 `body` 包裹层里），没有则返回空串。 */
+    fun businessErrorCode(raw: String): String {
+        val element = runCatching { json.parseToJsonElement(raw) }.getOrNull() ?: return ""
+        if (element !is JsonObject) return ""
+        element.str("error_code")?.takeIf { it.isNotBlank() }?.let { return it }
+        val body = element["body"]
+        if (body is JsonObject) body.str("error_code")?.takeIf { it.isNotBlank() }?.let { return it }
+        return ""
     }
 
     private suspend fun send(
@@ -82,40 +102,44 @@ internal class CloudHttp(
         headers: Map<String, String>,
         callId: String,
     ): String {
+        // gate 覆盖「等间隔 + 发请求 + 读响应」全过程：慢请求不会与后续请求重叠（进程内单飞）。
         gate.withLock {
-            val wait = minIntervalMillis - (System.currentTimeMillis() - lastRequestAt)
+            val wait = minIntervalMillis - (nowMillis() - lastRequestAt)
             if (wait > 0) sleep(wait)
-            lastRequestAt = System.currentTimeMillis()
-        }
-        val conn = URL(url).openConnection() as HttpURLConnection
-        try {
-            conn.requestMethod = method
-            conn.connectTimeout = 15_000
-            conn.readTimeout = 25_000
-            conn.setRequestProperty("User-Agent", CLOUD_USER_AGENT)
-            conn.setRequestProperty("Origin", CLOUD_ORIGIN)
-            conn.setRequestProperty("Referer", "$CLOUD_ORIGIN/")
-            conn.setRequestProperty("Accept", "application/json, text/plain, */*")
-            headers.forEach { (k, v) -> conn.setRequestProperty(k, v) }
-            if (body != null) {
-                conn.setRequestProperty("Content-Type", "text/plain;charset=UTF-8")
-                conn.doOutput = true
-                conn.outputStream.use { it.write(body.toByteArray()) }
+            lastRequestAt = nowMillis()
+            val conn = URL(url).openConnection() as HttpURLConnection
+            try {
+                conn.requestMethod = method
+                conn.connectTimeout = 15_000
+                conn.readTimeout = 25_000
+                conn.setRequestProperty("User-Agent", CLOUD_USER_AGENT)
+                conn.setRequestProperty("Origin", CLOUD_ORIGIN)
+                conn.setRequestProperty("Referer", "$CLOUD_ORIGIN/")
+                conn.setRequestProperty("Accept", "application/json, text/plain, */*")
+                headers.forEach { (k, v) -> conn.setRequestProperty(k, v) }
+                if (body != null) {
+                    conn.setRequestProperty("Content-Type", "text/plain;charset=UTF-8")
+                    conn.doOutput = true
+                    conn.outputStream.use { it.write(body.toByteArray()) }
+                }
+                val code = conn.responseCode
+                val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
+                    ?.bufferedReader()?.use { it.readText() }.orEmpty()
+                if (code == 401 || code == 403) throw CloudException("$callId HTTP $code", httpStatus = code)
+                if (code !in 200..299) throw CloudException("$callId HTTP $code：${text.take(160)}", httpStatus = code)
+                return text
+            } catch (e: CloudException) {
+                throw e
+            } catch (e: Exception) {
+                throw CloudException("$callId 网络失败：${e.message}")
+            } finally {
+                conn.disconnect()
             }
-            val code = conn.responseCode
-            val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
-                ?.bufferedReader()?.use { it.readText() }.orEmpty()
-            if (code == 401 || code == 403) throw CloudException("$callId HTTP $code", httpStatus = code)
-            if (code !in 200..299) throw CloudException("$callId HTTP $code：${text.take(160)}", httpStatus = code)
-            return text
-        } catch (e: CloudException) {
-            throw e
-        } catch (e: Exception) {
-            throw CloudException("$callId 网络失败：${e.message}")
-        } finally {
-            conn.disconnect()
         }
     }
+
+    /** 单调时钟：系统时间被改动时不会把间隔算错。 */
+    private fun nowMillis(): Long = System.nanoTime() / 1_000_000L
 
     // ---- 响应解析（纯函数，供 JVM 测试） ----
 
@@ -189,5 +213,8 @@ internal class CloudHttp(
 
     companion object {
         private const val MAX_ATTEMPTS = 3
+
+        /** 进程内共享实例：限速与退避是账号/IP 维度的，多个客户端各建一份等于没限速。 */
+        internal val shared: CloudHttp by lazy { CloudHttp() }
     }
 }

@@ -49,7 +49,7 @@ internal data class CloudParam(val label: String, val value: String)
  * 注意：详情接口有 IP 级频控，连续请求会返回 `E01_0701`，需静默退避；本类内置串行限速。
  */
 internal class CloudCatalogClient(
-    private val http: CloudHttp = CloudHttp(),
+    private val http: CloudHttp = CloudHttp.shared,
 ) {
     suspend fun fetchCatalog(): List<CloudRecipe> = withContext(Dispatchers.IO) {
         val body = """{"ownerUserId":"nikon","bookId":"$OFFICIAL_BOOK_ID","sortType":0,"lang_code":"zh-cn","country":"CN"}"""
