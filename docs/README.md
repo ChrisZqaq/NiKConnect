@@ -10,7 +10,7 @@
 
 - 仓库根 `CLAUDE.md`：代码风格与工程规范（`AGENTS.md` 为其符号链接）。
 - 仓库根 `PROGRESS.md`：进展与问题记录（持续更新）。
-- [acceptance/](acceptance/)：验收记录，每版本一份，模板见 [acceptance/TEMPLATE.md](acceptance/TEMPLATE.md)。
+- [acceptance/](acceptance/)：验收记录，每版本一份，模板见 [acceptance/TEMPLATE.md](acceptance/TEMPLATE.md)。最新：[acceptance/0.5.md](acceptance/0.5.md)（云创原生浏览，2026-11-13 真机通过，含四项遗留）。
 
 ## 技术与证据
 
@@ -36,4 +36,4 @@
 1. 先更新 Markdown 源文档，再生成 DOCX / 重打包 zip（本机暂无 pandoc/soffice 时先记未同步，不提交过期 docx）。
 2. 真机事实、源码观察、开源参考和推断分开记录。
 3. 未执行的真机测试保持"未验证"，不得写成"已支持"。
-4. 近期顺序：0.5 云创原生页真机验收 → 0.6 云创账号（收藏/相机 9 槽排布）→ 0.4 遗留 RAW 哈希与分块对照。
+4. 近期顺序：0.6 云创账号（收藏/相机 9 槽排布，先补 [acceptance/0.5.md](acceptance/0.5.md) 的 guid 命中项）→ 0.4 遗留 RAW 哈希与分块对照。0.5 已于 2026-11-13 真机通过。

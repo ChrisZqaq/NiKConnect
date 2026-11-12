@@ -6,9 +6,9 @@
 
 ## 当前状态
 
-- **版本**：0.5.2-alpha（云创原生浏览页 + token/guid 多源抓取 + 去叠层重做 + 默认最新在前；JVM 51 项测试通过，真机未验）
+- **版本**：0.5.2-alpha（云创原生浏览页 + token/guid 多源抓取 + 去叠层重做 + 默认最新在前；真机已由用户确认通过，见 [docs/acceptance/0.5.md](docs/acceptance/0.5.md)）
 - **真机基线**：一加 Ace 5 Pro + Nikon Zf
-- **未关闭验证**：0.4 RAW 哈希/分块对照；云创登录 token/guid 抓取（0.5.2 扩到 header+JWT+JS 多源，待真机确认 guid 是否落库）；0.5 云创原生页真机（封面加载、详情参数、频控退避、入口是否最新在前）；云创账号语义（收藏到书 vs 相机槽位）待批次 2 验证
+- **未关闭验证**：0.4 RAW 哈希/分块对照；0.5 遗留四项（在线刷新频控、详情参数与官网逐项对照、guid 实际命中的来源、蜂窝网络封面流量）；云创账号语义（收藏到书 vs 相机槽位）待批次 2 验证
 
 ## 版本历史
 
@@ -19,9 +19,9 @@
 | 0.2 | 串行下载队列、传输页取消/重试、图库多选、图库分页 | ✅ 用户确认 | [docs/acceptance/0.2.md](docs/acceptance/0.2.md) |
 | 0.3 | 前台服务保活、唤醒锁、UI 重整、单图查看器、跨会话已下载角标 | ✅ 用户确认 | [docs/acceptance/0.3.md](docs/acceptance/0.3.md) |
 | 0.4 | RAW（NEF/NRW）传输与发布、图库三档视图 | ⏳ 哈希/分块对照待补 | [docs/acceptance/0.4.md](docs/acceptance/0.4.md) |
-| 0.5 | 云创原生浏览页（目录/搜索/排序/详情/参数表，零登录） | ⏳ 待真机 | — |
-| 0.5.1 | token 抓取改为 WebView 拦截接口请求头（HttpOnly 也能拿）、网格滚动状态归位入口、登录页反馈 | ⏳ 待真机 | — |
-| 0.5.2 | guid 多源抓取（header/JWT/JS/URL）、云创页去叠层重做、默认排序改最新在前、入口强制回顶 | ⏳ 待真机 | — |
+| 0.5 | 云创原生浏览页（目录/搜索/排序/详情/参数表，零登录） | ✅ 用户确认（2026-11-13） | [docs/acceptance/0.5.md](docs/acceptance/0.5.md) |
+| 0.5.1 | token 抓取改为 WebView 拦截接口请求头（HttpOnly 也能拿）、网格滚动状态归位入口、登录页反馈 | ✅ 用户确认（2026-11-13） | 并入 0.5 记录 |
+| 0.5.2 | guid 多源抓取（header/JWT/JS/URL）、云创页去叠层重做、默认排序改最新在前、入口强制回顶 | ✅ 用户确认（2026-11-13） | 并入 0.5 记录 |
 
 ## 2026-11-10 · 0.2 批次 1：串行下载队列（已完成）
 
@@ -252,6 +252,10 @@
 - **UI 叠层过多**：重写 `app/src/main/java/com/chrisz/nikconnect/ui/CloudBrowseScreen.kt`。卡片去掉封面上的渐变蒙版、叠字标题、NEW 角标，只留「封面 + 两行文字」，NEW 用一个 6dp 金点表示；工具栏压成单行「云创 + 数量 + 账号 + 刷新」；排序从 FilterChip 胶囊改成纯文字（选中主色加粗）；详情页去掉盖在头图上的半透明圆形返回按钮，改为常规顶栏 `DetailTopBar`；头图改为带外边距的圆角图；参数从「每项一张卡」改为一张平铺两列表（发丝分割线）；作者/baseName/settingName 三个 chip 合成一行次要色文字。
 - **显示在最下方 / id=1 猜想**：id 不是数字而是 26 位 ULID，官方接口返回的目录顺序是**按上架时间升序**（第一条 `01JAY529N3SBMRS5ENMYH6CA6Q Negative Film Yellow 01a` 是 2024-10-24，最后一条 `01M3P67BB9NR1QMJHMQ870XW52 Mate Film by Choi matae` 是 2026-10-14）——所以「最老的在前」这个直觉是对的，列表天然从最老那头开始。两处处置：默认排序由「推荐（官方原序）」改为「最新」（按 `publicDate` 降序），进入即最新在前；同时在 `CloudBrowseContent` 加 `LaunchedEffect(Unit) { gridState.scrollToItem(0) }`，进入/返回列表一律落回顶部。
 - 验证：`:app:testDebugUnitTest`（51 项 0 失败）、`:app:lintDebug`（0 error / 6 warning，均为既有项）、`:app:assembleDebug`（--offline）全部通过；版本 0.5.2-alpha（versionCode 7）；APK SHA-256 `de947f8481c8e6d987de869c1b13f9f531757f6ed6046de34e32f679b6ac48a1`。
+
+## 2026-11-13 · 0.5 验收归档
+
+用户 `9246ea2`（0.5.2-alpha）真机确认「这版没问题了」。三轮反馈（0.5.0 抓不到 token / 停在最后一行 / guid 看不懂 → 0.5.1 token 拿到但 guid 空 / UI 叠层 → 0.5.2 全部收敛）已写入 [docs/acceptance/0.5.md](docs/acceptance/0.5.md)。记录同时列出四项未确认项（在线刷新频控、详情参数与官网逐项对照、guid 实际命中来源、蜂窝网络封面流量），不按推测填通过。
 
 ## 开放问题
 
