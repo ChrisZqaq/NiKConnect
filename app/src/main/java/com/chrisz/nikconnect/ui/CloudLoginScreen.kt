@@ -15,6 +15,38 @@ import androidx.compose.ui.viewinterop.AndroidView
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.Toast
+
+/** 在当前页面 origin 内扫描 localStorage/sessionStorage/cookie，提取 access_token（JWT 以 eyJ 开头，不含 |）。 */
+private val TOKEN_EXTRACT_JS = """
+(function(){
+  function pick(str){
+    if(!str || str.length < 20) return null;
+    var m = str.match(/"access_token"\s*:\s*"([^"]{40,})"/);
+    if(m) return {t: m[1], g: (str.match(/"guid"\s*:\s*"([^"]+)"/)||[])[1] || ''};
+    return null;
+  }
+  function scan(store){
+    try{
+      for(var i=0;i<store.length;i++){
+        var k = store.key(i); var v = store.getItem(k);
+        var r = pick(v || '');
+        if(r) return r;
+        if(v && v.indexOf('eyJ') === 0 && v.length > 200) return {t: v, g: ''};
+      }
+    }catch(e){}
+    return null;
+  }
+  var r = scan(localStorage) || scan(sessionStorage);
+  if(!r){
+    try{
+      var m = document.cookie.match(/access_token=([^;]+)/);
+      if(m){ var t = decodeURIComponent(m[1]); if(t.length > 40) r = {t: t, g: (document.cookie.match(/guid=([^;]+)/)||[])[1] || ''}; }
+    }catch(e){}
+  }
+  return r ? (r.t + '|' + r.g) : '';
+})()
+""".trimIndent()
 
 /**
  * 云创登录结果：token 与用户 guid 由 WebView 抓取。
@@ -44,6 +76,21 @@ fun CloudLoginScreen(
     var capturedGuid by remember { mutableStateOf("") }
     var showManual by remember { mutableStateOf(false) }
     var completed by remember { mutableStateOf(false) }
+
+    /** 从 WebView 当前页提取 token；返回 null 表示未找到。 */
+    fun extractFromPage() {
+        val view = webView ?: return
+        view.evaluateJavascript(TOKEN_EXTRACT_JS) { value ->
+            val raw = value?.trim('"', ' ', '|') ?: return@evaluateJavascript
+            if (completed || raw.isEmpty()) return@evaluateJavascript
+            val tokenPart = raw.substringBefore('|')
+            val guidPart = raw.substringAfter('|', "")
+            if (tokenPart.length > 40) {
+                capturedToken = tokenPart
+                capturedGuid = guidPart
+            }
+        }
+    }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -112,6 +159,7 @@ fun CloudLoginScreen(
                     onClick = {
                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         clipboard.setPrimaryClip(ClipData.newPlainText("access_token", capturedToken))
+                        Toast.makeText(context, "已复制到剪贴板", Toast.LENGTH_SHORT).show()
                     },
                     modifier = Modifier.weight(1f),
                 ) { Text("复制 token") }
@@ -124,72 +172,44 @@ fun CloudLoginScreen(
                 ) { Text("返回 App") }
             }
         }
-        if (capturedToken.isBlank()) AndroidView(
-            factory = { ctx ->
-                WebView(ctx).apply {
-                    settings.javaScriptEnabled = true
-                    settings.domStorageEnabled = true
-                    webView = this
-                    webViewClient = object : WebViewClient() {
-                        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean = false
-                        override fun onPageFinished(view: WebView?, url: String?) {
-                            super.onPageFinished(view, url)
-                            // 尝试从云创域名 localStorage 提取 keycloak token
-                            view?.evaluateJavascript(
-                                """
-                                (function(){
-                                  try {
-                                    var kc = null;
-                                    for (var i = 0; i < localStorage.length; i++) {
-                                      var k = localStorage.key(i);
-                                      if (k && k.indexOf('kc-c0004') === 0) { kc = localStorage.getItem(k); break; }
-                                    }
-                                    if (kc) { return kc; }
-                                    return '';
-                                  } catch(e) { return ''; }
-                                })()
-                                """.trimIndent(),
-                            ) { value ->
-                                if (!completed && value != null && value.length > 40) {
-                                    val t = value.trim('"').trim()
-                                    if (t.contains("access_token") || t.length > 200) {
-                                        // kc-c0004 存储 JSON 形如 {"access_token":"...","...}
-                                        val token = extractJsonField(t, "access_token") ?: t
-                                        val guid = extractJsonField(t, "guid")
-                                        capturedToken = token
-                                        capturedGuid = guid.orEmpty()
+        if (capturedToken.isBlank()) {
+            TextButton(
+                onClick = { extractFromPage() },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            ) { Text("登录完成后点这里提取 token") }
+            AndroidView(
+                factory = { ctx ->
+                    WebView(ctx).apply {
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        webView = this
+                        webViewClient = object : WebViewClient() {
+                            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean = false
+                            override fun onPageFinished(view: WebView?, url: String?) {
+                                super.onPageFinished(view, url)
+                                // 登录跳转完成后自动提取一次；未命中时用户可点上方按钮手动提取
+                                view?.evaluateJavascript(TOKEN_EXTRACT_JS) { value ->
+                                    val raw = value?.trim('"', ' ', '|') ?: return@evaluateJavascript
+                                    if (completed || raw.isEmpty()) return@evaluateJavascript
+                                    val tokenPart = raw.substringBefore('|')
+                                    if (tokenPart.length > 40) {
+                                        capturedToken = tokenPart
+                                        capturedGuid = raw.substringAfter('|', "")
                                     }
                                 }
                             }
                         }
+                        loadUrl("https://imagingcloud.nikon.com.cn/recipe/index/")
                     }
-                    loadUrl("https://imagingcloud.nikon.com.cn/recipe/index/")
-                }
-            },
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-        )
+                },
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+            )
+        }
         Text(
-            "登录完成后复制 token，点“返回 App”继续；手动输入也可粘贴 token 并填写 guid。",
+            "登录完成后：页面会自动提取 token；若未出现，点“提取 token”按钮或用“手动输入”粘贴。",
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(12.dp),
         )
     }
 }
 
-internal fun extractJsonField(json: String, field: String): String? {
-    val marker = "\"$field\""
-    val idx = json.indexOf(marker)
-    if (idx < 0) return null
-    var i = idx + marker.length
-    while (i < json.length && json[i] != ':') i++
-    i++
-    while (i < json.length && json[i] == ' ') i++
-    if (i >= json.length || json[i] != '"') return null
-    i++
-    val sb = StringBuilder()
-    while (i < json.length && json[i] != '"') {
-        if (json[i] == '\\' && i + 1 < json.length) { i++; sb.append(json[i]) } else sb.append(json[i])
-        i++
-    }
-    return sb.toString()
-}
