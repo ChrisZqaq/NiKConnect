@@ -236,7 +236,8 @@
 - **token 抓不到**：旧实现只在 WebView 页面 JS 环境里扫 localStorage/sessionStorage/cookie。尼康云创把 token 放在 HttpOnly cookie 或内存里时 JS 读不到，扫描必然返回空；而返回空时旧代码没有任何提示，所以「点了没作用」。改为在 `WebViewClient.shouldInterceptRequest` 里读请求头：页面自身调云创接口时 `access_token`（或 `Authorization: Bearer`）一定是明文，即使 cookie 是 HttpOnly 也能截到；同时从 URL 里提取 26 位 ULID 作为账号 guid；`onPageStarted` 再兜一层 `#access_token=`/`?access_token=`。JS 扫描降级为次要来源，未命中时弹提示「请先在网页里点开任意方案」。
 - **列表停在最后一行**：代码里没有任何滚动到底的调用。最可能是 `rememberLazyGridState`（Compose 内部即 `rememberSaveable`）的状态被跨组合恢复。改为在 `CloudTab` 用普通 `remember { LazyGridState() }` 持有并下传：进出 tab 必从第一条开始，查看详情再返回仍保留位置。
 - **「相机注册 ID」文案错误**：云创的 `guid` 不是相机 ID，是**账号**维度标识（26 位 ULID，出现在 `/camera/{guid}/`、`/publicrecipe/{guid}` 路径里）；0.5 的零登录浏览根本不需要它，只在 0.6 的账号接口（收藏、相机槽位）才用。文案改为「账号 guid（可留空)」，并说明来源。
-- 验证：`:app:compileDebugKotlin`、`:app:testDebugUnitTest`（51 项）、`:app:assembleDebug`（--offline）通过；版本 0.5.1-alpha（versionCode 6）。真机待验：token 是否能在登录后自动出现、列表入口是否回到顶部。
+- **界面文案纠错**：旧文案写「浏览器 F12 → Application → Local Storage」「抓包 URL 里的 26 位 ULID」——这是桌面浏览器思路，手机上根本没有开发者工具。改为「粘贴 access_token（一般无需手动，登录后会自动捕获）」「账号 guid（可留空，自动从接口地址提取）」；登录页新增状态行「自动捕获：等待接口请求…／成功（token 前 8 位…）」+「重新加载」按钮，引导语改成「登录后在网页里点开任意方案即可，无需手动操作」。
+- 验证：`:app:compileDebugKotlin`、`:app:testDebugUnitTest`（51 项）、`:app:lintDebug`（0 error/6 warning）、`:app:assembleDebug`（--offline）通过；版本 0.5.1-alpha（versionCode 6）。真机待验：token 是否能在登录后自动出现、列表入口是否回到顶部。
 
 ## 开放问题
 

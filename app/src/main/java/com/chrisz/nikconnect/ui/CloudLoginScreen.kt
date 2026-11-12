@@ -55,11 +55,11 @@ private val TOKEN_EXTRACT_JS = """
 private fun tokenFromHeaders(headers: Map<String, String>?): String? {
     if (headers.isNullOrEmpty()) return null
     headers.entries.firstOrNull { it.key.equals("access_token", ignoreCase = true) }
-        ?.value?.trim()?.takeIf { it.length > 40 }?.let { return it }
+        ?.value?.trim()?.trim('"')?.takeIf { it.length > 40 }?.let { return it }
     headers.entries.firstOrNull { it.key.equals("authorization", ignoreCase = true) }
         ?.value?.trim()
         ?.takeIf { it.startsWith("Bearer ", ignoreCase = true) }
-        ?.substring(7)?.trim()?.takeIf { it.length > 40 }?.let { return it }
+        ?.substring(7)?.trim()?.trim('"')?.takeIf { it.length > 40 }?.let { return it }
     return null
 }
 
@@ -166,14 +166,14 @@ fun CloudLoginScreen(
             OutlinedTextField(
                 value = manualToken,
                 onValueChange = { manualToken = it },
-                label = { Text("粘贴 access_token（浏览器 F12 → Application → Local Storage）") },
+                label = { Text("粘贴 access_token（一般无需手动，登录后会自动捕获）") },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 minLines = 2,
             )
             OutlinedTextField(
                 value = manualGuid,
                 onValueChange = { manualGuid = it },
-                label = { Text("账号 guid（可留空，抓包 URL 里的 26 位 ULID）") },
+                label = { Text("账号 guid（可留空，自动从接口地址提取）") },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 singleLine = true,
             )
@@ -245,13 +245,24 @@ fun CloudLoginScreen(
             Modifier.fillMaxWidth().padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                "登录后需在网页里点开任意方案（触发一次接口请求）才能抓到 token。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
-            )
-            TextButton(onClick = { extractFromPage() }) { Text("提取 token") }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    if (capturedToken.isEmpty()) "自动捕获：等待接口请求…"
+                    else "自动捕获：成功（token ${capturedToken.take(8)}…）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (capturedToken.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    "登录后在网页里点开任意方案即可，无需手动操作。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (capturedToken.isEmpty()) {
+                TextButton(onClick = { webView?.reload() }) { Text("重新加载") }
+            }
+            TextButton(onClick = { extractFromPage() }) { Text("再查一次") }
         }
         AndroidView(
             factory = { ctx ->
