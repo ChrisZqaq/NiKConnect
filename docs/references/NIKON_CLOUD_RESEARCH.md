@@ -59,3 +59,23 @@ B0 技术探针清单（待排期）：
 - GetPicCtrlCapability 的具体 opcode 值（在 n15 映射表里，需真机枚举或进一步逆 native）
 - 公共书接口返回体是否含 NP3 字节（需登录验证；倾向只含元数据）
 - Zf 云优化校准（CLOUD CUSTOM）槽位与 NP3 的兼容性（固件相关）
+
+## 6. 相机同步页（/recipe/camera）的真实接口（2026-11-12 从 chunk 反解）
+
+来源：`imagingcloud.nikon.com.cn` buildId `rLax9kgZn4MRCkSdCQt5i` 的
+`static/chunks/pages/recipe/camera-129ad77c551770c0.js`。页面文案标识为「ピクチャーコントロールの同期操作」。
+
+| callId | 方法 + 路径 | 作用 |
+| --- | --- | --- |
+| `IF_FR100_H13` | `POST https://api.user.cwp.imagingcloud.nikon.com.cn/bff/recipe/camera`，header `access_token`，body `{"country":"CN"}` | 取「可分配给相机」的方案列表 |
+| `IF_IR_R_C002` | `GET https://api.user.ir.imagingcloud.nikon.com.cn/camera/{guid}/{cameraId}`，`Authorization: Bearer` | 取该相机当前的槽位排布 |
+| `IF_IR_R_C004` | `PATCH .../camera/{guid}/{cameraId}`，body `{"recipes":[...]}` | 提交槽位排布（数组顺序即槽位顺序） |
+| `IF_IR_R_C005` | `DELETE .../camera/{guid}/{cameraId}/{recipeId}`，`Bearer` | 移除某个方案 |
+
+页面交互是「拖动排序」：`slot_num` 显示槽位图标（`icon_pc0{1..9}`），`slot_content` 是拖拽列表，`onDragEnd` 后走 `PATCH {recipes:[...]}`。
+`GET` 返回的每一项含 `{id, exist, pictureControlName, modifyDate, link, name, img}`——`exist` 表示该槽位当前是否已有方案。
+
+**与现有实现的差异**：`NikonCloudClient.addRecipesToBook()` 目前打的是 `POST /publicrecipe/{guid}`（"收藏到书"），语义是个人书架，不是相机槽位分配。
+真正的"选方案 → 占 9 个槽位 → 相机同步"应走 `PATCH /camera/{guid}/{cameraId}`。
+
+**槽位性质**：网页管理的是相机的「云创槽位」（9 个），与相机内的自定义槽位 C-1…C-9 不是同一套存储；同步后出现在设定优化校准的云创区，要进 C-1…C-9 仍需相机内「管理优化校准 → 保存/编辑」复制。
