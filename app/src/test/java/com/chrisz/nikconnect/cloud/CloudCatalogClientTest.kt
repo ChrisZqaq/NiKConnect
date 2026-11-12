@@ -11,7 +11,7 @@ import org.junit.Test
  */
 class CloudCatalogClientTest {
 
-    private fun client() = CloudCatalogClient(minIntervalMillis = 0)
+    private fun client() = CloudCatalogClient()
 
     @Test
     fun `parses catalog with covers`() {
@@ -62,7 +62,7 @@ class CloudCatalogClientTest {
         try {
             client().parseCatalog(limited)
             fail("expected CloudException")
-        } catch (e: CloudCatalogClient.CloudException) {
+        } catch (e: CloudException) {
             assertEquals("E01_0701", e.errorCode)
         }
     }
@@ -124,7 +124,7 @@ class CloudCatalogClientTest {
         try {
             client().parseDetail("""{"id": "broken""")
             fail("expected CloudException")
-        } catch (e: CloudCatalogClient.CloudException) {
+        } catch (e: CloudException) {
             assertTrue(e.message!!.contains("不是合法 JSON"))
         }
     }
@@ -134,7 +134,7 @@ class CloudCatalogClientTest {
         try {
             client().parseDetail("""{"name":"no id"}""")
             fail("expected CloudException")
-        } catch (e: CloudCatalogClient.CloudException) {
+        } catch (e: CloudException) {
             assertTrue(e.message!!.contains("缺少 id"))
         }
     }

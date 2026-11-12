@@ -166,13 +166,13 @@ private fun NiKConnectContent(
             if (!connected && state.selectedTab != 2) {
                 ConnectionScreen(state, onConnect)
             } else if (!connected && state.selectedTab == 2) {
-                CloudTab(cloudToken = state.cloudToken, onLogin = onCloudLogin, onLogout = onCloudLogout)
+                CloudTab(cloudToken = state.cloudToken, cloudGuid = state.cloudGuid, onLogin = onCloudLogin, onLogout = onCloudLogout)
             } else if (state.selectedTab == 0) {
                 GalleryScreen(state, onDownload, onDownloadAll, onLoadMore, onViewTier, thumbnailLoader)
             } else if (state.selectedTab == 1) {
                 TransferScreen(state, onRetryDownload, onCancelDownload)
             } else {
-                CloudTab(cloudToken = state.cloudToken, onLogin = onCloudLogin, onLogout = onCloudLogout)
+                CloudTab(cloudToken = state.cloudToken, cloudGuid = state.cloudGuid, onLogin = onCloudLogin, onLogout = onCloudLogout)
             }
         }
     }

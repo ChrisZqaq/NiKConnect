@@ -6,9 +6,9 @@
 
 ## 当前状态
 
-- **版本**：0.5.2-alpha（云创原生浏览页 + token/guid 多源抓取 + 去叠层重做 + 默认最新在前；真机已由用户确认通过，见 [docs/acceptance/0.5.md](docs/acceptance/0.5.md)）
+- **版本**：0.6.0-alpha（云创账号批次 1：相机列表与 9 个云创槽位只读查看；JVM 54 项测试通过，真机未验）
 - **真机基线**：一加 Ace 5 Pro + Nikon Zf
-- **未关闭验证**：0.4 RAW 哈希/分块对照；0.5 遗留四项（在线刷新频控、详情参数与官网逐项对照、guid 实际命中的来源、蜂窝网络封面流量）；云创账号语义（收藏到书 vs 相机槽位）待批次 2 验证
+- **未关闭验证**：0.4 RAW 哈希/分块对照；0.5 遗留三项（在线刷新频控、详情参数与官网逐项对照、蜂窝网络封面流量）；0.6 相机列表与槽位接口的响应形状（真机未验，解析按特征嗅探 + 原始响应可截图）；0.6 批次 2（拖拽排布、收藏到书）未开工
 
 ## 版本历史
 
@@ -22,6 +22,7 @@
 | 0.5 | 云创原生浏览页（目录/搜索/排序/详情/参数表，零登录） | ✅ 用户确认（2026-11-13） | [docs/acceptance/0.5.md](docs/acceptance/0.5.md) |
 | 0.5.1 | token 抓取改为 WebView 拦截接口请求头（HttpOnly 也能拿）、网格滚动状态归位入口、登录页反馈 | ✅ 用户确认（2026-11-13） | 并入 0.5 记录 |
 | 0.5.2 | guid 多源抓取（header/JWT/JS/URL）、云创页去叠层重做、默认排序改最新在前、入口强制回顶 | ✅ 用户确认（2026-11-13） | 并入 0.5 记录 |
+| 0.6.0（批次 1） | 云创账号页：已注册相机列表、9 个云创槽位只读查看、可分配方案数；HTTP 传输收敛到 `CloudHttp` 单一入口 | ⏳ 待真机 | — |
 
 ## 2026-11-10 · 0.2 批次 1：串行下载队列（已完成）
 
@@ -256,6 +257,20 @@
 ## 2026-11-13 · 0.5 验收归档
 
 用户 `9246ea2`（0.5.2-alpha）真机确认「这版没问题了」。三轮反馈（0.5.0 抓不到 token / 停在最后一行 / guid 看不懂 → 0.5.1 token 拿到但 guid 空 / UI 叠层 → 0.5.2 全部收敛）已写入 [docs/acceptance/0.5.md](docs/acceptance/0.5.md)。记录同时列出四项未确认项（在线刷新频控、详情参数与官网逐项对照、guid 实际命中来源、蜂窝网络封面流量），不按推测填通过。
+
+## 2026-11-13 · 0.6 批次 1：云创账号只读核对
+
+用户确认 guid 已抓到，按 PRD 进入 0.6。批次 1 只做**读**，因为 `IF_IR_R_C001`（相机列表）、`IF_IR_R_C002`（槽位）的响应形状只在 Web chunk 里见过调用、没在真机看过返回体，先拿到真实响应再决定写路径的字段。
+
+- **传输收敛**：新增 `app/src/main/java/com/chrisz/nikconnect/cloud/CloudHttp.kt`，把串行限速（1.2s）、`E01_0701` 退避（3s×attempt，最多 3 次）、401/403 区分、`body` 包裹解包统一到一处；`CloudCatalogClient` 改为持有一个 `CloudHttp`，删掉自带的 transport 与 `NikonCloudClient`（147 行的旧类，含未被调用的 `parseRecipeList`）。这落实了 CLAUDE.md「新增端点复用同一入口」的约束。
+- **新客户端**：`app/src/main/java/com/chrisz/nikconnect/cloud/CloudAccountClient.kt`
+  - `listCameras()` → `GET $IR_HOST/camera/{guid}/`（Bearer，IF_IR_R_C001）
+  - `cameraSlots(cameraId)` → `GET $IR_HOST/camera/{guid}/{cameraId}`（Bearer，IF_IR_R_C002）
+  - `assignableRecipes()` → `POST $CWP_HOST/bff/recipe/camera`（header `access_token`，body `{"country":"CN"}`，IF_FR100_H13）
+  - 解析一律「按特征嗅探」：`findObjectArray` 先按候选键（cameraList/cameras/slots/recipes…）找，再递归找第一个元素含 `id`/`pictureControlName`/`exist` 的对象数组；槽位号优先取 `slot`/`slotNum`，否则用数组顺序。形状不认识时返回空列表而不是抛错，避免把「未知」误报成「失败」。
+- **界面**：`ui/CloudAccountViewModel.kt` + `ui/CloudAccountScreen.kt`。云创页工具栏人像图标 → 账号页：已注册相机列表（名称/型号/ID）→ 点进相机看 9 个槽位（序号、方案名、英文代号、修改日期，空位显灰「空」），顶部显示账号可分配方案数；解析失败时把**接口原始响应**摊开显示（不含 token），便于截图反馈。批次 2 的拖拽排布按钮先置灰占位。
+- **测试**：`app/src/test/java/com/chrisz/nikconnect/cloud/CloudAccountClientTest.kt` 8 项——相机列表（body 包裹 / 裸数组 / cameraId 键 / 未知形状返回空）、槽位（数组顺序即槽位号、`exist` 字符串与布尔混用、声明式 `slot` 优先）、可分配方案（封面与代号两种键名）、`E01_0701` 抛带码异常、残缺 JSON 抛错。全仓 **54 项 JVM 测试 0 失败**；lint 0 error / 6 warning（均为既有项）。
+- **未验**：真机上这三个端点是否都返回 200（尤其 `GET /camera/{guid}/` 在「账号下没绑定相机」时的形状）、`CloudHttp` 的 1.2s 串行限速在连续点击下是否够稳。
 
 ## 开放问题
 

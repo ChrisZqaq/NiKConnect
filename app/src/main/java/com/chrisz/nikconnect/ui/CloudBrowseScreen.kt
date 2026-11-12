@@ -25,7 +25,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Person
@@ -68,9 +68,9 @@ import com.chrisz.nikconnect.cloud.CloudParam
 import com.chrisz.nikconnect.cloud.CloudRecipe
 
 /**
- * 云创 tab：原生浏览（批次 1）。
+ * 云创 tab：原生浏览 + 账号侧槽位查看。
  *
- * 目录不需要登录；账号入口先保留（批次 2 接入收藏与槽位分配）。
+ * 目录不需要登录；登录后从工具栏的人像图标进入账号页，只读查看「已注册相机 → 9 个云创槽位」。
  *
  * 设计约定（用户反馈"叠层太多"后重做）：封面不做渐变蒙版、不叠文字与角标；
  * 信息一律排在封面下方，用 字号/颜色 分层，不靠卡片套卡片。
@@ -78,14 +78,29 @@ import com.chrisz.nikconnect.cloud.CloudRecipe
 @Composable
 internal fun CloudTab(
     cloudToken: String?,
+    cloudGuid: String?,
     onLogin: (CloudAuthState) -> Unit,
     onLogout: () -> Unit,
 ) {
     val model: CloudCatalogViewModel = viewModel()
     val catalog by model.state.collectAsStateWithLifecycle()
     var showLogin by rememberSaveable { mutableStateOf(false) }
+    var showAccount by rememberSaveable { mutableStateOf(false) }
     // 普通 remember（非 rememberSaveable）：进出 tab 必从第一条开始，位置不会被跨组合恢复。
     val gridState = remember { LazyGridState() }
+
+    if (showAccount) {
+        CloudAccountScreen(
+            token = cloudToken.orEmpty(),
+            guid = cloudGuid,
+            onBack = { showAccount = false },
+            onLogout = {
+                showAccount = false
+                onLogout()
+            },
+        )
+        return
+    }
 
     if (showLogin) {
         CloudLoginScreen(
@@ -131,8 +146,7 @@ internal fun CloudTab(
             onSort = model::setSort,
             onToggleNew = model::toggleOnlyNew,
             onOpen = model::openDetail,
-            onLoginClick = { showLogin = true },
-            onLogout = onLogout,
+            onLoginClick = { if (cloudToken == null) showLogin = true else showAccount = true },
         )
     }
 }
@@ -149,7 +163,6 @@ private fun CloudBrowseContent(
     onToggleNew: () -> Unit,
     onOpen: (String) -> Unit,
     onLoginClick: () -> Unit,
-    onLogout: () -> Unit,
 ) {
     val visible = state.visible
 
@@ -172,16 +185,12 @@ private fun CloudBrowseContent(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.weight(1f))
-            if (loggedIn) {
-                TextButton(onClick = onLogout, modifier = Modifier.heightIn(min = 48.dp)) { Text("退出") }
-            } else {
-                IconButton(onClick = onLoginClick, modifier = Modifier.size(48.dp)) {
-                    Icon(
-                        Icons.Default.Person,
-                        contentDescription = "登录尼康账号",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+            IconButton(onClick = onLoginClick, modifier = Modifier.size(48.dp)) {
+                Icon(
+                    Icons.Default.Person,
+                    contentDescription = if (loggedIn) "云创账号与相机槽位" else "登录尼康账号",
+                    tint = if (loggedIn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             IconButton(onClick = onRefresh, enabled = !state.refreshing, modifier = Modifier.size(48.dp)) {
                 if (state.refreshing) {
@@ -433,7 +442,7 @@ private fun DetailTopBar(title: String, onBack: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
-            Icon(Icons.Default.ArrowBack, contentDescription = "返回列表")
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回列表")
         }
         Text(
             title,
