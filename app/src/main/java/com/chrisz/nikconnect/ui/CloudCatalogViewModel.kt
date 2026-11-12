@@ -17,7 +17,15 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 
-internal enum class CloudSort(val label: String) { CURATED("推荐"), NEWEST("最新"), POPULAR("热门") }
+/**
+ * 排序项。官方接口返回的目录是"按上架时间升序"（2024 年的老方案在最前），
+ * 直接沿用会让人以为列表从头就是最老的那批，所以默认改成最新在前。
+ */
+internal enum class CloudSort(val label: String) {
+    NEWEST("最新"),
+    POPULAR("热门"),
+    OLDEST("最早"),
+}
 
 internal data class CloudCatalogState(
     val recipes: List<CloudRecipe> = emptyList(),
@@ -27,7 +35,7 @@ internal data class CloudCatalogState(
     val refreshing: Boolean = false,
     val error: String? = null,
     val query: String = "",
-    val sort: CloudSort = CloudSort.CURATED,
+    val sort: CloudSort = CloudSort.NEWEST,
     val onlyNew: Boolean = false,
     val detail: CloudRecipeDetail? = null,
     val detailRequestId: String? = null,
@@ -43,9 +51,9 @@ internal data class CloudCatalogState(
                         recipe.pictureControlName.contains(q, ignoreCase = true))
             }
             return when (sort) {
-                CloudSort.CURATED -> filtered
                 CloudSort.NEWEST -> filtered.sortedByDescending { it.publicDate }
                 CloudSort.POPULAR -> filtered.sortedByDescending { it.likes }
+                CloudSort.OLDEST -> filtered.sortedBy { it.publicDate }
             }
         }
 }

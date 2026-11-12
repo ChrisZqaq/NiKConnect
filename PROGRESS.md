@@ -6,9 +6,9 @@
 
 ## 当前状态
 
-- **版本**：0.5.1-alpha（云创原生浏览页 + token 抓取改为拦截接口请求头；JVM 51 项测试通过，真机未验）
+- **版本**：0.5.2-alpha（云创原生浏览页 + token/guid 多源抓取 + 去叠层重做 + 默认最新在前；JVM 51 项测试通过，真机未验）
 - **真机基线**：一加 Ace 5 Pro + Nikon Zf
-- **未关闭验证**：0.4 RAW 哈希/分块对照、云创登录 token 提取（0.5.1 改为请求头拦截，待真机）；0.5 云创原生页真机（封面加载、详情参数、频控退避）；云创账号语义（收藏到书 vs 相机槽位）待批次 2 验证
+- **未关闭验证**：0.4 RAW 哈希/分块对照；云创登录 token/guid 抓取（0.5.2 扩到 header+JWT+JS 多源，待真机确认 guid 是否落库）；0.5 云创原生页真机（封面加载、详情参数、频控退避、入口是否最新在前）；云创账号语义（收藏到书 vs 相机槽位）待批次 2 验证
 
 ## 版本历史
 
@@ -21,6 +21,7 @@
 | 0.4 | RAW（NEF/NRW）传输与发布、图库三档视图 | ⏳ 哈希/分块对照待补 | [docs/acceptance/0.4.md](docs/acceptance/0.4.md) |
 | 0.5 | 云创原生浏览页（目录/搜索/排序/详情/参数表，零登录） | ⏳ 待真机 | — |
 | 0.5.1 | token 抓取改为 WebView 拦截接口请求头（HttpOnly 也能拿）、网格滚动状态归位入口、登录页反馈 | ⏳ 待真机 | — |
+| 0.5.2 | guid 多源抓取（header/JWT/JS/URL）、云创页去叠层重做、默认排序改最新在前、入口强制回顶 | ⏳ 待真机 | — |
 
 ## 2026-11-10 · 0.2 批次 1：串行下载队列（已完成）
 
@@ -238,6 +239,19 @@
 - **「相机注册 ID」文案错误**：云创的 `guid` 不是相机 ID，是**账号**维度标识（26 位 ULID，出现在 `/camera/{guid}/`、`/publicrecipe/{guid}` 路径里）；0.5 的零登录浏览根本不需要它，只在 0.6 的账号接口（收藏、相机槽位）才用。文案改为「账号 guid（可留空)」，并说明来源。
 - **界面文案纠错**：旧文案写「浏览器 F12 → Application → Local Storage」「抓包 URL 里的 26 位 ULID」——这是桌面浏览器思路，手机上根本没有开发者工具。改为「粘贴 access_token（一般无需手动，登录后会自动捕获）」「账号 guid（可留空，自动从接口地址提取）」；登录页新增状态行「自动捕获：等待接口请求…／成功（token 前 8 位…）」+「重新加载」按钮，引导语改成「登录后在网页里点开任意方案即可，无需手动操作」。
 - 验证：`:app:compileDebugKotlin`、`:app:testDebugUnitTest`（51 项）、`:app:lintDebug`（0 error/6 warning）、`:app:assembleDebug`（--offline）通过；版本 0.5.1-alpha（versionCode 6）。真机待验：token 是否能在登录后自动出现、列表入口是否回到顶部。
+
+## 2026-11-12 · 0.5.2：guid 抓取、界面去叠层、默认排序
+
+真机反馈三条（用户 22:51）：token 能抓到但 guid 抓不到；云创 UI「很难看，太多叠层」；进入滤镜页仍显示在最下方，怀疑「最老的滤镜 id 是 1」。
+
+- **guid 抓不到**：旧实现只从接口 URL 里提 26 位 ULID，账号接口路径里没有 ULID 时就永远空。现在四个来源依次尝试并各自独立补写（token 与 guid 分开存，不再要求同时命中）：
+  1. 请求头：键为 `guid`/`userid` 或含 `guid` 的值，须匹配 ULID 或 UUID；
+  2. JWT：`Base64 URL_SAFE` 解 payload，依次读 `guid`/`userGuid`/`user_guid`/`userId`/`user_id`/`uid`/`sub`；
+  3. 接口 URL：先 ULID（26 位 Crockford Base32）再 UUID（36 位带横线）；
+  4. 页面 JS：扫 localStorage/sessionStorage 里键含 `guid` 的值与 JSON 里的 `userGuid|guid|userId` 字段。
+- **UI 叠层过多**：重写 `app/src/main/java/com/chrisz/nikconnect/ui/CloudBrowseScreen.kt`。卡片去掉封面上的渐变蒙版、叠字标题、NEW 角标，只留「封面 + 两行文字」，NEW 用一个 6dp 金点表示；工具栏压成单行「云创 + 数量 + 账号 + 刷新」；排序从 FilterChip 胶囊改成纯文字（选中主色加粗）；详情页去掉盖在头图上的半透明圆形返回按钮，改为常规顶栏 `DetailTopBar`；头图改为带外边距的圆角图；参数从「每项一张卡」改为一张平铺两列表（发丝分割线）；作者/baseName/settingName 三个 chip 合成一行次要色文字。
+- **显示在最下方 / id=1 猜想**：id 不是数字而是 26 位 ULID，官方接口返回的目录顺序是**按上架时间升序**（第一条 `01JAY529N3SBMRS5ENMYH6CA6Q Negative Film Yellow 01a` 是 2024-10-24，最后一条 `01M3P67BB9NR1QMJHMQ870XW52 Mate Film by Choi matae` 是 2026-10-14）——所以「最老的在前」这个直觉是对的，列表天然从最老那头开始。两处处置：默认排序由「推荐（官方原序）」改为「最新」（按 `publicDate` 降序），进入即最新在前；同时在 `CloudBrowseContent` 加 `LaunchedEffect(Unit) { gridState.scrollToItem(0) }`，进入/返回列表一律落回顶部。
+- 验证：`:app:testDebugUnitTest`（51 项 0 失败）、`:app:lintDebug`（0 error / 6 warning，均为既有项）、`:app:assembleDebug`（--offline）全部通过；版本 0.5.2-alpha（versionCode 7）；APK SHA-256 `de947f8481c8e6d987de869c1b13f9f531757f6ed6046de34e32f679b6ac48a1`。
 
 ## 开放问题
 

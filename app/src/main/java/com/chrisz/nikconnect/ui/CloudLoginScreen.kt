@@ -29,6 +29,19 @@ private val TOKEN_EXTRACT_JS = """
     if(m) return {t: m[1], g: (str.match(/"guid"\s*:\s*"([^"]+)"/)||[])[1] || ''};
     return null;
   }
+  var GUID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+  var UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+  function scanGuid(store){
+    try{
+      for(var i=0;i<store.length;i++){
+        var k = store.key(i); var v = store.getItem(k) || '';
+        if(/guid/i.test(k) && (GUID.test(v) || UUID.test(v))) return v;
+        var m = v.match(/"(?:userGuid|user_guid|guid|userId|user_id)"\s*:\s*"([^"]{8,64})"/);
+        if(m && (GUID.test(m[1]) || UUID.test(m[1]))) return m[1];
+      }
+    }catch(e){}
+    return null;
+  }
   function scan(store){
     try{
       for(var i=0;i<store.length;i++){
@@ -40,13 +53,16 @@ private val TOKEN_EXTRACT_JS = """
     }catch(e){}
     return null;
   }
+  var gOnly = scanGuid(localStorage) || scanGuid(sessionStorage) || '';
   var r = scan(localStorage) || scan(sessionStorage);
+  if(r && !r.g && gOnly) r.g = gOnly;
   if(!r){
     try{
       var m = document.cookie.match(/access_token=([^;]+)/);
       if(m){ var t = decodeURIComponent(m[1]); if(t.length > 40) r = {t: t, g: (document.cookie.match(/guid=([^;]+)/)||[])[1] || ''}; }
     }catch(e){}
   }
+  if(!r && gOnly) return '|' + gOnly;
   return r ? (r.t + '|' + r.g) : '';
 })()
 """.trimIndent()
@@ -63,11 +79,45 @@ private fun tokenFromHeaders(headers: Map<String, String>?): String? {
     return null
 }
 
-/** 云创账号 guid 是 ULID（26 位 Crockford Base32），出现在 `/camera/{guid}/` 这类路径里。 */
-private val GUID_IN_URL = Regex("[0-9A-HJKMNP-TV-Z]{26}")
+/**
+ * 账号 guid 出现在 `/camera/{guid}/`、`/publicrecipe/{guid}` 这类路径和部分请求头里。
+ * 形态未在真机确认：可能是 ULID（26 位 Crockford Base32）也可能是 UUID，两种都收。
+ */
+private val ULID_IN_TEXT = Regex("[0-9A-HJKMNP-TV-Z]{26}")
+private val UUID_IN_TEXT =
+    Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 
-/** 从 URL 里兜底取 guid；取不到返回 null。 */
-private fun guidFromUrl(url: String): String? = GUID_IN_URL.find(url)?.value
+/** 从 URL 里取 guid（ULID 优先，其次 UUID）；取不到返回 null。 */
+private fun guidFromUrl(url: String): String? =
+    ULID_IN_TEXT.find(url)?.value ?: UUID_IN_TEXT.find(url)?.value
+
+/** 从请求头里取 guid：`guid` / `x-guid` / `user-guid` / `userid` 等常见命名。 */
+private fun guidFromHeaders(headers: Map<String, String>?): String? {
+    if (headers.isNullOrEmpty()) return null
+    val candidate = headers.entries.firstOrNull { entry ->
+        val key = entry.key.lowercase()
+        key == "guid" || key == "userid" || key.contains("guid")
+    }?.value?.trim()?.trim('"') ?: return null
+    return candidate.takeIf { ULID_IN_TEXT.matches(it) || UUID_IN_TEXT.matches(it) }
+}
+
+/** 兜底：从 JWT 载荷里读 guid 相关 claim（guid / userGuid / userId / sub）。 */
+private fun guidFromJwt(token: String?): String? {
+    val payload = token?.split('.')?.getOrNull(1)?.takeIf { it.isNotBlank() } ?: return null
+    val decoded = runCatching {
+        val bytes = android.util.Base64.decode(
+            payload,
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP,
+        )
+        String(bytes, Charsets.UTF_8)
+    }.getOrNull() ?: return null
+    val claims = runCatching { org.json.JSONObject(decoded) }.getOrNull() ?: return null
+    listOf("guid", "userGuid", "user_guid", "userId", "user_id", "uid", "sub").forEach { key ->
+        val value = claims.optString(key).trim()
+        if (value.length in 8..64) return value
+    }
+    return null
+}
 
 /** OAuth 隐式/查询串回跳里直接带 token 的情况：`#access_token=...` 与 `?access_token=...`。 */
 private fun tokenFromUrl(url: String): String? {
@@ -111,14 +161,14 @@ fun CloudLoginScreen(
     var tokenVisible by remember { mutableStateOf(false) }
     var completed by remember { mutableStateOf(false) }
 
-    /** 收到 token 后统一入库；guid 只在还没有值时补写，避免被 URL 里别的 ULID 覆盖。 */
+    /** 统一入库：token 与 guid 各自只在还没有值时补写，避免被 URL 里别的 ULID 覆盖。 */
     fun acceptToken(token: String?, guid: String?) {
+        if (completed) return
         val t = token?.trim().orEmpty()
-        if (t.length <= 40 || completed) return
-        if (capturedToken.isNotEmpty()) return
-        capturedToken = t
-        val g = guid?.trim().orEmpty()
+        val g = guid?.trim().orEmpty().ifEmpty { if (t.length > 40) guidFromJwt(t).orEmpty() else "" }
         if (g.isNotEmpty() && capturedGuid.isEmpty()) capturedGuid = g
+        if (t.length <= 40 || capturedToken.isNotEmpty()) return
+        capturedToken = t
     }
 
     /** 从 WebView 当前页提取 token；未命中时给出可操作提示（旧版静默无反馈）。 */
@@ -282,10 +332,16 @@ fun CloudLoginScreen(
                             view: WebView?,
                             request: WebResourceRequest?,
                         ): WebResourceResponse? {
-                            val token = tokenFromHeaders(request?.requestHeaders)
+                            val headers = request?.requestHeaders
+                            val url = request?.url?.toString().orEmpty()
+                            val token = tokenFromHeaders(headers)
                             if (token != null) {
-                                val guid = request?.url?.toString()?.let(::guidFromUrl)
+                                val guid = guidFromHeaders(headers) ?: guidFromUrl(url)
                                 view?.post { acceptToken(token, guid) }
+                            } else if (capturedGuid.isEmpty()) {
+                                // 只拿到 guid、还没拿到 token 的请求也顺手记下
+                                val guid = guidFromHeaders(headers) ?: guidFromUrl(url)
+                                if (guid != null) view?.post { acceptToken(null, guid) }
                             }
                             return null
                         }
