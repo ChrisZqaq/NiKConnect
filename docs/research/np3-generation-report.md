@@ -88,3 +88,41 @@
 - 生成的 NP3 未经真机写入测试（未验证相机是否接受 `generated/` 里的文件）。
 - 0x1F / 0x20 / BI0 三个块的内部结构只做到"逐字节可用"，未做到语义解析（未确认锚点到 253 点曲线是否为同一插值算法）。
 - MORNING 等非 FLEXIBLE COLOR 基准未标定常量表（仅 1 个样本，不足以拟合）。
+
+## 7. 如何取得「准确的」NP3（原始字节）
+
+按可行性排序。共同前提：NP3 是相机侧 Picture Control 的完整快照（含曲线），所以要么从相机拿，要么让相机产出。
+
+### R1 相机导出到存储卡（最干脆，可进 App）
+
+相机菜单「管理 Picture Control / 管理优化校准」→「保存到存储卡」。
+卡上路径 `NIKON/CUSTOMPC/*.NP3`（也可直接放存储卡根目录，相机同样能载入）。
+文件名为 `01.NP3`…`99.NP3`（每类型上限 99，单卡合计 297）；双卡机型只读主卡槽。
+卡必须先用该相机格式化；格式化会清掉卡上 NP3。
+
+**NiKConnect 可行性**：卡上文件可走现有 PTP 通道读取（`GetObjectHandles` → `GetObject`），也可读卡器直拷。需真机确认相机是否把 `NIKON/CUSTOMPC` 里的对象暴露给 PTP。
+
+### R2 NX Studio 从照片反推（无云创机型唯一路）
+
+用支持云创的机身（Z6III / Zf / Z8 FW3.0+）把配方同步进机 → 拍一张 → NX Studio 导入该 NEF → 优化校准面板导出 `.NP3`。
+或直接在 NX Studio 里调参数后导出（曲线由软件生成）。
+依据：[Nikon NX Studio 帮助 · 导入/导出自定义优化校准文件](https://www.nikonimglib.com/nxstdo/onlinehelp/cn/copy_custom_picture_controls_50.html)、[Picture Control Utility 2 · 导出自定义优化校准](https://nikonimglib.com/npcu/onlinehelp/cn/pc013000.html)
+
+### R3 PTP 槽位直读（ZRelay 路线）
+
+`GetVendorPropCodes` → `GetPicCtrlData` 直接取槽位字节，不依赖存储卡。见 §5-3。
+
+### R4 云创服务端（已排除浏览器侧）
+
+`/recipe/camera` 页只发 `PUT /camera/{id}/{slot}`（`Authorization: Bearer`），NP3 的组装与下发都在服务端，下发目标是相机主动拉取 → **浏览器/抓包拿不到 NP3 字节**。
+`POST /bff/recipe/release/download` 路由不存在（API Gateway 对未匹配路由回 403 `Missing Authentication Token`）。
+
+### R5 社区分享
+
+已有 [Timor88/NikonNP3](https://github.com/Timor88/NikonNP3) 32 个样本；小红书 / 闲鱼 / 微信「云创滤镜包」常见整套转存（来源不可信，仅作素材）。
+
+### R6 自建闭环：生成 → 进机 → 再导出
+
+把本仓 `generated/` 的参数型 NP3 放卡 → 相机载入 → 再从相机「保存到存储卡」导出。
+若导出文件出现 `BI0` 尾（978B），说明**相机自己会补齐曲线**，这条路就能把参数型 NP3 变成准确 NP3。
+一次实验即可判定，是当前最高性价比的验证。
