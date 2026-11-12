@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-- **版本**：0.6.0-alpha（云创账号批次 1：相机列表与 9 个云创槽位只读查看；JVM 54 项测试通过，真机未验）
+- **版本**：0.6.1-alpha（云创账号批次 1：相机列表与 9 个云创槽位只读查看；修正账号 guid 提取规则——0.6.0 把方案 ID 当账号 ID 导致 `IF_IR_R_C001` 422；JVM 60 项测试通过，真机待验）
 - **真机基线**：一加 Ace 5 Pro + Nikon Zf
 - **未关闭验证**：0.4 RAW 哈希/分块对照；0.5 遗留三项（在线刷新频控、详情参数与官网逐项对照、蜂窝网络封面流量）；0.6 相机列表与槽位接口的响应形状（真机未验，解析按特征嗅探 + 原始响应可截图）；0.6 批次 2（拖拽排布、收藏到书）未开工
 
@@ -271,6 +271,18 @@
 - **界面**：`ui/CloudAccountViewModel.kt` + `ui/CloudAccountScreen.kt`。云创页工具栏人像图标 → 账号页：已注册相机列表（名称/型号/ID）→ 点进相机看 9 个槽位（序号、方案名、英文代号、修改日期，空位显灰「空」），顶部显示账号可分配方案数；解析失败时把**接口原始响应**摊开显示（不含 token），便于截图反馈。批次 2 的拖拽排布按钮先置灰占位。
 - **测试**：`app/src/test/java/com/chrisz/nikconnect/cloud/CloudAccountClientTest.kt` 8 项——相机列表（body 包裹 / 裸数组 / cameraId 键 / 未知形状返回空）、槽位（数组顺序即槽位号、`exist` 字符串与布尔混用、声明式 `slot` 优先）、可分配方案（封面与代号两种键名）、`E01_0701` 抛带码异常、残缺 JSON 抛错。全仓 **54 项 JVM 测试 0 失败**；lint 0 error / 6 warning（均为既有项）。
 - **未验**：真机上这三个端点是否都返回 200（尤其 `GET /camera/{guid}/` 在「账号下没绑定相机」时的形状）、`CloudHttp` 的 1.2s 串行限速在连续点击下是否够稳。
+
+## 2026-11-13 · 0.6.1：`IF_IR_R_C001` 422 的根因与修正
+
+真机点人像图标进账号页，`GET /camera/{guid}/` 返回 422。对照 Web chunk 确认路径拼法与官方一致（`index-02c60951e817d908.js` 模块 6982：`/camera/${i}/` + `Authorization: Bearer`），所以问题在 **guid 取错**而不是接口拼错。
+
+- **根因**：0.5.2 的 `guidFromUrl` 是"URL 里第一个 26 位 ULID"。但云创详情的真实地址是 `GET /publicrecipe/0000000000000001/{recipeId}`——`0000000000000001` 只有 16 位不匹配，于是紧跟其后的**方案 ID** 被当成账号 guid。`acceptToken` 又是"guid 只写一次"，一旦先浏览过方案详情，错值就固定下来了。422 的语义也吻合：路由匹配上了，但路径参数过不了网关校验。
+- **修正**（提交见本节末尾）：
+  - 新建 `app/src/main/java/com/chrisz/nikconnect/cloud/CloudIdentifiers.kt`：`guidFromUrl` 改为**语义提取**——只认紧跟在 `camera`/`publicrecipe`/`localrecipe`/`publicbook` 之后的路径段，且必须是 ULID/UUID 形态，否则直接放弃（不再往后找）。另收 `?guid=`/`#userGuid=` 查询串。`guidFromJwt` 与 `guidCandidates` 也放这里，供 UI 与 ViewModel 共用。
+  - `CloudLoginScreen` 删除本地三份 guid 提取实现，改用共享函数；新增 `startUrl` 参数，可直接把 WebView 开到网页「相机」页。
+  - `CloudAccountViewModel` 逐候选试：先用手上 guid，失败再试 token 里 JWT claim 的值；只有 400/401/403/422 才换候选（频控与网络问题换 guid 无意义）。成功后把生效的 guid 写回 state 供后续槽位接口使用。
+  - 账号页新增「重新获取账号 ID」：422/无 guid 时出现，点了直接打开网页 `https://imagingcloud.nikon.com.cn/recipe/camera`——该页自己会发 `IF_IR_R_C001`，`shouldInterceptRequest` 从请求 URL 读到真实 guid，不用用户手动抄。
+- **测试**：新增 `app/src/test/java/com/chrisz/nikconnect/cloud/CloudIdentifiersTest.kt` 6 项，其中一条专门锁死「方案详情地址不得泄漏方案 ID」。
 
 ## 开放问题
 

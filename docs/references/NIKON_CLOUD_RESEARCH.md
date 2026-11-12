@@ -119,3 +119,16 @@ B0 技术探针清单（待排期）：
 | `IF_FR100_H13` | `POST /bff/recipe/camera`（`.cwp`，`access_token`，`{country}`） | 可分配给相机的方案列表 |
 
 结论：云创 Web 的所有用户操作都是普通 HTTP + `access_token`/`Bearer`，没有客户端签名或设备指纹。原生 App UI 可以完整复刻，WebView 只需承担一次登录。
+### 6.1 请求 URL 的精确拼法（Web chunk 原文）
+
+- `IF_IR_R_C001`（`pages/recipe/index-02c60951e817d908.js` 模块 6982）：
+  `GET https://api.user.ir.imagingcloud.nikon.com.cn/camera/{guid}/`，头 `Authorization: Bearer <token>`。
+- `IF_IR_R_C002` / `IF_IR_R_C004`（`pages/recipe/camera-129ad77c551770c0.js`）：
+  `GET|PATCH https://api.user.ir.imagingcloud.nikon.com.cn/camera/{guid}/{cameraId}`，
+  PATCH 带 `Content-Type: application/json`，body `{"recipes":[...]}`。
+- `IF_IR_R_C005`：`DELETE .../camera/{guid}/{cameraId}/{recipeId}`。
+- `IF_IR_R_C003`（追加）：`POST .../camera/{guid}/{cameraId}`，body `{"recipeIds":[...]}`。
+- `IF_FR100_H13`：`POST https://api.user.cwp.imagingcloud.nikon.com.cn/bff/recipe/camera`，
+  头 `access_token`，body `{"country":"CN"}`。
+- **路径参数的陷阱**：详情接口是 `GET /publicrecipe/0000000000000001/{recipeId}`——路径里第二段是**固定占位**（16 位，非 guid），
+  第三段才是方案 ID。任何"从 URL 抓 26 位 ULID 当账号 guid"的实现都会在这里抓错，表现为 `IF_IR_R_C001` 返回 422。

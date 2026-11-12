@@ -54,6 +54,7 @@ internal fun CloudAccountScreen(
     guid: String?,
     onBack: () -> Unit,
     onLogout: () -> Unit,
+    onRecaptureGuid: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
     val factory = viewModelFactory {
@@ -85,12 +86,35 @@ internal fun CloudAccountScreen(
             }
         }
 
+        if (state.needsGuidRefresh) {
+            GuidRefreshBar(onRecaptureGuid)
+        }
         if (!state.hasCredentials) {
-            Notice("没有拿到账号 guid。回到云创页，退出后重新登录一次，登录后在网页里点开任意方案即可自动捕获。")
+            Notice("没有拿到账号 guid。点上面「重新获取账号 ID」，在网页里打开相机页即可自动捕获。")
         } else if (state.selected == null) {
             CameraSection(state = state, onOpen = model::openCamera, onLogout = onLogout)
         } else {
             SlotSection(state = state, onRetry = { model.openCamera(state.selected!!) })
+        }
+    }
+}
+
+@Composable
+private fun GuidRefreshBar(onRecaptureGuid: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "账号 ID 可能不对（把方案 ID 当成了账号 ID）",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onRecaptureGuid, modifier = Modifier.heightIn(min = 48.dp)) {
+            Text("重新获取账号 ID")
         }
     }
 }

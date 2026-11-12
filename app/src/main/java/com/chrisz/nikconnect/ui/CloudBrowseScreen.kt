@@ -64,6 +64,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.chrisz.nikconnect.cloud.CLOUD_CAMERA_URL
+import com.chrisz.nikconnect.cloud.CLOUD_INDEX_URL
 import com.chrisz.nikconnect.cloud.CloudParam
 import com.chrisz.nikconnect.cloud.CloudRecipe
 
@@ -84,7 +86,8 @@ internal fun CloudTab(
 ) {
     val model: CloudCatalogViewModel = viewModel()
     val catalog by model.state.collectAsStateWithLifecycle()
-    var showLogin by rememberSaveable { mutableStateOf(false) }
+    // 登录页起始地址：普通流程从方案库进；需要重新抓账号 ID 时直接打开网页「相机」页（该页自己会发 C001）。
+    var loginStartUrl by rememberSaveable { mutableStateOf<String?>(null) }
     var showAccount by rememberSaveable { mutableStateOf(false) }
     // 普通 remember（非 rememberSaveable）：进出 tab 必从第一条开始，位置不会被跨组合恢复。
     val gridState = remember { LazyGridState() }
@@ -98,17 +101,23 @@ internal fun CloudTab(
                 showAccount = false
                 onLogout()
             },
+            onRecaptureGuid = {
+                showAccount = false
+                loginStartUrl = CLOUD_CAMERA_URL
+            },
         )
         return
     }
 
-    if (showLogin) {
+    loginStartUrl?.let { startUrl ->
         CloudLoginScreen(
             onDone = { auth ->
-                showLogin = false
+                loginStartUrl = null
                 if (auth.token != null) onLogin(auth)
+                showAccount = true
             },
-            onDismiss = { showLogin = false },
+            onDismiss = { loginStartUrl = null },
+            startUrl = startUrl,
         )
         return
     }
@@ -146,7 +155,9 @@ internal fun CloudTab(
             onSort = model::setSort,
             onToggleNew = model::toggleOnlyNew,
             onOpen = model::openDetail,
-            onLoginClick = { if (cloudToken == null) showLogin = true else showAccount = true },
+            onLoginClick = {
+                if (cloudToken == null) loginStartUrl = CLOUD_INDEX_URL else showAccount = true
+            },
         )
     }
 }

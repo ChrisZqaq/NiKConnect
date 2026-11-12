@@ -19,6 +19,11 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.chrisz.nikconnect.cloud.CLOUD_INDEX_URL
+import com.chrisz.nikconnect.cloud.CLOUD_CAMERA_URL
+import com.chrisz.nikconnect.cloud.guidFromJwt
+import com.chrisz.nikconnect.cloud.guidFromUrl
+import com.chrisz.nikconnect.cloud.isGuidLike
 
 /** 在当前页面 origin 内扫描 localStorage/sessionStorage/cookie，提取 access_token（JWT 以 eyJ 开头，不含 |）。 */
 private val TOKEN_EXTRACT_JS = """
@@ -79,18 +84,6 @@ private fun tokenFromHeaders(headers: Map<String, String>?): String? {
     return null
 }
 
-/**
- * 账号 guid 出现在 `/camera/{guid}/`、`/publicrecipe/{guid}` 这类路径和部分请求头里。
- * 形态未在真机确认：可能是 ULID（26 位 Crockford Base32）也可能是 UUID，两种都收。
- */
-private val ULID_IN_TEXT = Regex("[0-9A-HJKMNP-TV-Z]{26}")
-private val UUID_IN_TEXT =
-    Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
-
-/** 从 URL 里取 guid（ULID 优先，其次 UUID）；取不到返回 null。 */
-private fun guidFromUrl(url: String): String? =
-    ULID_IN_TEXT.find(url)?.value ?: UUID_IN_TEXT.find(url)?.value
-
 /** 从请求头里取 guid：`guid` / `x-guid` / `user-guid` / `userid` 等常见命名。 */
 private fun guidFromHeaders(headers: Map<String, String>?): String? {
     if (headers.isNullOrEmpty()) return null
@@ -98,25 +91,7 @@ private fun guidFromHeaders(headers: Map<String, String>?): String? {
         val key = entry.key.lowercase()
         key == "guid" || key == "userid" || key.contains("guid")
     }?.value?.trim()?.trim('"') ?: return null
-    return candidate.takeIf { ULID_IN_TEXT.matches(it) || UUID_IN_TEXT.matches(it) }
-}
-
-/** 兜底：从 JWT 载荷里读 guid 相关 claim（guid / userGuid / userId / sub）。 */
-private fun guidFromJwt(token: String?): String? {
-    val payload = token?.split('.')?.getOrNull(1)?.takeIf { it.isNotBlank() } ?: return null
-    val decoded = runCatching {
-        val bytes = android.util.Base64.decode(
-            payload,
-            android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP,
-        )
-        String(bytes, Charsets.UTF_8)
-    }.getOrNull() ?: return null
-    val claims = runCatching { org.json.JSONObject(decoded) }.getOrNull() ?: return null
-    listOf("guid", "userGuid", "user_guid", "userId", "user_id", "uid", "sub").forEach { key ->
-        val value = claims.optString(key).trim()
-        if (value.length in 8..64) return value
-    }
-    return null
+    return candidate.takeIf(::isGuidLike)
 }
 
 /** OAuth 隐式/查询串回跳里直接带 token 的情况：`#access_token=...` 与 `?access_token=...`。 */
@@ -150,6 +125,7 @@ data class CloudAuthState(
 fun CloudLoginScreen(
     onDone: (CloudAuthState) -> Unit,
     onDismiss: () -> Unit,
+    startUrl: String = CLOUD_INDEX_URL,
 ) {
     val context = LocalContext.current
     var webView by remember { mutableStateOf<WebView?>(null) }
@@ -364,7 +340,7 @@ fun CloudLoginScreen(
                             }
                         }
                     }
-                    loadUrl("https://imagingcloud.nikon.com.cn/recipe/index/")
+                    loadUrl(startUrl)
                 }
             },
             modifier = Modifier.weight(1f).fillMaxWidth(),

@@ -14,6 +14,12 @@ import java.net.URL
 internal const val CWP_HOST = "https://api.user.cwp.imagingcloud.nikon.com.cn"
 internal const val IR_HOST = "https://api.user.ir.imagingcloud.nikon.com.cn"
 internal const val CLOUD_ORIGIN = "https://imagingcloud.nikon.com.cn"
+/** 云创网页入口（方案库首页）。 */
+internal const val CLOUD_INDEX_URL = "$CLOUD_ORIGIN/recipe/index/"
+
+/** 云创网页的「相机」页：打开后网页自己会发 `IF_IR_R_C001`，从请求 URL 就能读到真实账号 guid。 */
+internal const val CLOUD_CAMERA_URL = "$CLOUD_ORIGIN/recipe/camera"
+
 internal const val CLOUD_USER_AGENT =
     "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Mobile Safari/537.36 NiKConnect/0.6"
 
