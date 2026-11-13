@@ -303,8 +303,8 @@ internal class CloudAccountClient(
      */
     override suspend fun saveToLibrary(
         name: String,
-        createdBy: String,
         resourceId: String,
+        createdBy: Int,
     ): String = withContext(Dispatchers.IO) {
         val body = buildJsonObject {
             put("name", JsonPrimitive(name))

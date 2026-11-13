@@ -79,9 +79,9 @@ class CloudFavoriteViewModelTest {
 
         var librarySave: Triple<String, String, String>? = null
 
-        override suspend fun saveToLibrary(name: String, createdBy: String, resourceId: String): String {
+        override suspend fun saveToLibrary(name: String, resourceId: String, createdBy: Int): String {
             favoriteError?.let { throw it }
-            librarySave = Triple(name, createdBy, resourceId)
+            librarySave = Triple(name, resourceId, createdBy.toString())
             return resourceId
         }
 
@@ -114,7 +114,7 @@ class CloudFavoriteViewModelTest {
     @Test
     fun `create book and favorite ends with notice and no phase`() = runTest(dispatcher) {
         val api = FakeApi(favoriteResult = listOf("recipe-1"))
-        val model = CloudFavoriteViewModel("token", "01STALEGUID00000000000000", api.let { { _: String, _: String -> it } })
+        val model = CloudFavoriteViewModel("token", "01STALEGUID00000000000000", apiFactory = api.let { { _: String, _: String -> it } })
 
         model.createBookAndFavorite("recipe-1")
         advanceUntilIdle()
@@ -131,7 +131,7 @@ class CloudFavoriteViewModelTest {
     @Test
     fun `create book failure keeps error with call id and detail`() = runTest(dispatcher) {
         val api = FakeApi(createError = CloudException("IF_IR_R_PB002 HTTP 422：", httpStatus = 422))
-        val model = CloudFavoriteViewModel("token", "g", { _: String, _: String -> api })
+        val model = CloudFavoriteViewModel("token", "g", apiFactory = { _: String, _: String -> api })
 
         model.createBookAndFavorite("recipe-1")
         advanceUntilIdle()
@@ -149,7 +149,7 @@ class CloudFavoriteViewModelTest {
     @Test
     fun `favorite into existing book failure reports PR001`() = runTest(dispatcher) {
         val api = FakeApi(favoriteError = CloudException("", errorCode = "E01_9999"))
-        val model = CloudFavoriteViewModel("token", "g", { _: String, _: String -> api })
+        val model = CloudFavoriteViewModel("token", "g", apiFactory = { _: String, _: String -> api })
         val book = CloudBook("book-1", "默认收藏夹", 0)
 
         model.favoriteInto("recipe-9", book)
@@ -164,7 +164,7 @@ class CloudFavoriteViewModelTest {
     fun `authoritative guid from userinfo is used instead of captured guid`() = runTest(dispatcher) {
         val api = FakeApi()
         val recorder = ApiRecorder(api)
-        val model = CloudFavoriteViewModel("token", "01STALEGUID00000000000000", recorder.factory())
+        val model = CloudFavoriteViewModel("token", "01STALEGUID00000000000000", apiFactory = recorder.factory())
 
         model.createBookAndFavorite("recipe-1")
         advanceUntilIdle()
@@ -178,7 +178,7 @@ class CloudFavoriteViewModelTest {
     @Test
     fun `load books populates list and clears loading`() = runTest(dispatcher) {
         val api = FakeApi(books = listOf(CloudBook("a", "书A", 3), CloudBook("b", "书B", 1)))
-        val model = CloudFavoriteViewModel("token", "g", { _: String, _: String -> api })
+        val model = CloudFavoriteViewModel("token", "g", apiFactory = { _: String, _: String -> api })
 
         model.loadBooks()
         advanceUntilIdle()
@@ -192,33 +192,32 @@ class CloudFavoriteViewModelTest {
     }
 
     @Test
-    fun `identity failure surfaces as PB002 error instead of silence`() = runTest(dispatcher) {
-        val api = FakeApi(identityError = CloudException("OIDC_USERINFO 认证失败（401）：重新登录一次云创", httpStatus = 401))
-        val model = CloudFavoriteViewModel("token", "g", { _: String, _: String -> api })
-
-        model.createBookAndFavorite("recipe-1")
+    fun `identity failure falls back to captured guid since refresh handles expiry`() = runTest {
+        val api = FakeApi(identityError = CloudException("OIDC_USERINFO HTTP 401：invalid_token", httpStatus = 401))
+        val vm = CloudFavoriteViewModel("token", "guid", apiFactory = { _, _ -> api })
+        vm.saveToLibrary("01RECIPE", "Mate Film")
         advanceUntilIdle()
 
-        val state = model.state.value
-        assertTrue(state.error.orEmpty().startsWith("IF_IR_R_PB002"))
-        assertTrue(state.error.orEmpty().contains("401"))
-        assertFalse(state.working)
+        val state = vm.state.value
+        // 账号信息取不到时不再直接失败：用登录时抓到的 guid 继续，401 由 withSession 的续期负责
+        assertNull(state.error)
+        assertEquals("01RECIPE", api.librarySave?.second)
     }
 
     @Test
     fun `saveToLibrary copies recipe into own library instead of a book`() = runTest {
         val fake = FakeApi()
         val vm = CloudFavoriteViewModel("token", "guid", apiFactory = { _, _ -> fake })
-        vm.saveToLibrary("01RECIPE", "Mate Film by Choi matae", "Choi matae")
+        vm.saveToLibrary("01RECIPE", "Mate Film by Choi matae")
         advanceUntilIdle()
 
         assertEquals(
-            Triple("Mate Film by Choi matae", "Choi matae", "01RECIPE"),
+            Triple("Mate Film by Choi matae", "01RECIPE", "2"),
             fake.librarySave,
         )
         val state = vm.state.value
         assertFalse(state.working)
         assertNull(state.error)
-        assertTrue(state.notice.orEmpty().contains("方案库"))
+        assertTrue(state.notice.orEmpty().contains("收藏"))
     }
 }

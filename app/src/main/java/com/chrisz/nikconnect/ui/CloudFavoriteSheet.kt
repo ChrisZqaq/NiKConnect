@@ -58,6 +58,8 @@ internal fun CloudFavoriteBar(
     guid: String?,
     onNeedLogin: () -> Unit,
     createdBy: String = "Nikon",
+    refreshToken: String? = null,
+    onTokenRefreshed: (String, String?) -> Unit = { _, _ -> },
 ) {
     if (token.isNullOrBlank()) {
         OutlinedButton(
@@ -72,7 +74,14 @@ internal fun CloudFavoriteBar(
     }
 
     val factory = viewModelFactory {
-        initializer { CloudFavoriteViewModel(token, guid) }
+        initializer {
+            CloudFavoriteViewModel(
+                token = token.orEmpty(),
+                guid = guid,
+                refreshToken = refreshToken,
+                onTokenRefreshed = onTokenRefreshed,
+            )
+        }
     }
     val model: CloudFavoriteViewModel = viewModel(key = "cloud-favorite-$guid", factory = factory)
     val state by model.state.collectAsStateWithLifecycle()
@@ -107,7 +116,7 @@ internal fun CloudFavoriteBar(
             state = state,
             onPick = { book -> model.favoriteInto(recipeId, book) },
             onCreate = { model.createBookAndFavorite(recipeId) },
-            onSaveToLibrary = { model.saveToLibrary(recipeId, recipeName, createdBy) },
+            onSaveToLibrary = { model.saveToLibrary(recipeId, recipeName) },
             onRetry = model::loadBooks,
             onDismiss = {
                 model.clearError()
@@ -136,7 +145,7 @@ private fun FavoriteSheet(
         ) {
             Text("收藏", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Text(
-                "$recipeName · 复制一份到「我的方案库」，之后就能排进相机槽位",
+                "$recipeName · 复制一份到你的收藏，之后就能排进相机槽位",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 8.dp),
@@ -202,9 +211,9 @@ private fun FavoriteSheet(
                             tint = MaterialTheme.colorScheme.primary,
                         )
                         Column {
-                            Text("保存到我的方案库", style = MaterialTheme.typography.bodyLarge)
+                            Text("收藏到我的收藏", style = MaterialTheme.typography.bodyLarge)
                             Text(
-                                "推荐：不依赖收藏夹，之后可直接排进相机槽位",
+                                "之后可在相机槽位「＋」里选它",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )

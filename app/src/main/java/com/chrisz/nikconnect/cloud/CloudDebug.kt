@@ -21,6 +21,19 @@ internal object CloudDebug {
     @Volatile
     var enabled: Boolean = false
 
+    /**
+     * 仅 debug 构建：把当前 token 落盘，便于用 `curl` 在 Mac 上快速试接口形状，
+     * 不必为了换一个 body 重新打一次包装一次机。**测试结束应该删掉这个文件**。
+     */
+    fun recordToken(token: String?, refresh: String?) {
+        val target = dir ?: return
+        if (!enabled) return
+        runCatching {
+            if (!target.exists()) target.mkdirs()
+            File(target, "token.txt").writeText("access=${token.orEmpty()}\nrefresh=${refresh.orEmpty()}\n")
+        }
+    }
+
     fun record(callId: String, request: String?, response: String?) {
         val target = dir ?: return
         if (!enabled) return

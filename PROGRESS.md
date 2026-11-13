@@ -25,6 +25,21 @@
   `NetworkOnMainThreadException`，而它的 message 是 null，日志里只留「网络失败：null」，白查了一轮）。
 - **未完成**：真机验证 LR002（设备当时被占用：横屏 + 通话中）。
 
+## 2026-11-14 · 0.7.3：收藏打通（LR002，createdBy 是枚举 2）
+
+- **收藏真身**：`POST /localrecipe/{guid}` body `{"name","createdBy":2,"resourceId":<公共方案ID>}`。
+  网页端常量 `W.v0.RELEASE_RECIPE = 2`；我们最初把 `createdBy` 填成作者名 → **422**。
+  改传 `2` 后真机 `202`，`IF_FR100_H05` 的 `localRecipes` 16 → 17 → 18，新方案排最前。
+- **收藏夹（book）彻底排除**：`PB002` 只在发布流程用（403），`PR001` 也 403（7 种形状都试过）。
+  改用 curl 直连同一 token 复验：`publicrecipe/{guid}` 三组 bookId 全 403 —— 与 App 无关。
+- **收藏流程也会续期**：`CloudFavoriteViewModel` 新增 `withSession{}` 包装 + `tryRefresh()`，
+  401/403 先换新 token 再重试一次（此前收藏点到就报「认证失败」）。
+- 文案统一：「收藏到我的收藏」「之后可在相机槽位「＋」里选它」。
+- 127 项 JVM 测试 0 失败、lint 0 error / 6 warning；`0.7.3-alpha` / vc 34。
+- 调试辅助：`CloudDebug.recordToken()`（仅 debuggable）把 token 落盘到 `cacheDir/cloud_debug/token.txt`，
+  便于在 Mac 上用 curl 试接口形状；用完已从设备删除。
+- `docs/acceptance/0.6.md` 新增 §7.1 收藏验收表（PB002 记“不适用”、LR002 记通过并附数据）。
+
 ## 版本历史
 
 | 版本 | 内容 | 真机 | 验收记录 |

@@ -35,10 +35,14 @@ internal data class CloudFavoriteState(
 internal class CloudFavoriteViewModel(
     token: String,
     guid: String?,
+    private val refreshToken: String? = null,
+    private val onTokenRefreshed: (String, String?) -> Unit = { _, _ -> },
     private val apiFactory: (token: String, guid: String) -> CloudAccountApi =
         { t, g -> CloudAccountClient(accessToken = t, guid = g) },
 ) : ViewModel() {
     private var accessToken: String = token
+    private var currentRefresh: String? = refreshToken
+    private var refreshAttempted = false
     private var accountGuid: String = guid.orEmpty()
 
     private val _state = MutableStateFlow(CloudFavoriteState())
@@ -60,7 +64,7 @@ internal class CloudFavoriteViewModel(
         viewModelScope.launch {
             try {
                 ensureGuid()
-                val mine = api().fetchMyRecipes()
+                val mine = withSession { api().fetchMyRecipes() }
                 _state.update {
                     it.copy(
                         books = mine.books,
@@ -89,7 +93,7 @@ internal class CloudFavoriteViewModel(
         viewModelScope.launch {
             try {
                 ensureGuid()
-                val created = api().favoriteRecipes(book.id, listOf(recipeId))
+                val created = withSession { api().favoriteRecipes(book.id, listOf(recipeId)) }
                 _state.update {
                     it.copy(
                         working = false,
@@ -121,9 +125,9 @@ internal class CloudFavoriteViewModel(
         viewModelScope.launch {
             try {
                 ensureGuid()
-                val bookId = api().createBook(name)
+                val bookId = withSession { api().createBook(name) }
                 _state.update { it.copy(phase = "正在把方案放进新收藏夹…") }
-                val created = api().favoriteRecipes(bookId, listOf(recipeId))
+                val created = withSession { api().favoriteRecipes(bookId, listOf(recipeId)) }
                 _state.update {
                     it.copy(
                         working = false,
@@ -151,19 +155,20 @@ internal class CloudFavoriteViewModel(
      * “发布方案”流程里调它；而方案库（H05 的 `localRecipes`）是「我的方案」本身，复制进去之后
      * 就能用 `IF_IR_R_C003` 加进相机池。所以收藏按钮走这条路。
      */
-    fun saveToLibrary(recipeId: String, recipeName: String, createdBy: String) {
+    fun saveToLibrary(recipeId: String, recipeName: String) {
         if (recipeId.isBlank() || _state.value.working) return
         _state.update { it.copy(working = true, error = null, detail = null, phase = "正在保存到我的方案库…") }
         viewModelScope.launch {
             try {
                 ensureGuid()
-                api().saveToLibrary(
-                    name = recipeName.ifBlank { "NiKConnect" },
-                    createdBy = createdBy.ifBlank { "Nikon" },
-                    resourceId = recipeId,
-                )
+                withSession {
+                    api().saveToLibrary(
+                        name = recipeName.ifBlank { "NiKConnect" },
+                        resourceId = recipeId,
+                    )
+                }
                 _state.update {
-                    it.copy(working = false, phase = null, notice = "已保存到我的方案库，可在相机槽位里选它")
+                    it.copy(working = false, phase = null, notice = "已收藏到「我的收藏」，可在槽位「＋」里选它")
                 }
                 refreshBooksQuietly()
             } catch (e: Exception) {
@@ -182,11 +187,39 @@ internal class CloudFavoriteViewModel(
      * 收藏接口的路径里带账号 guid；登录时可能只抓到 token，所以这里先向 OIDC userinfo
      * 要一次权威 guid（`GET .../protocol/openid-connect/userinfo`），避免拼出空段 URL。
      */
+    /**
+     * access_token 只有几十分钟，收藏往往在过期后才被点到。这里照账号页的做法：
+     * 401/403 先拿 refresh_token 换新，换到了就重试一次，换不到才报「重新登录」。
+     */
+    private suspend fun <T> withSession(block: suspend () -> T): T {
+        try {
+            return block()
+        } catch (e: CloudException) {
+            if (e.httpStatus != 401 && e.httpStatus != 403) throw e
+            if (!tryRefresh()) throw e
+            return block()
+        }
+    }
+
+    private suspend fun tryRefresh(): Boolean {
+        val refresh = currentRefresh?.takeIf { it.isNotBlank() } ?: return false
+        if (refreshAttempted) return false
+        refreshAttempted = true
+        val next = runCatching { api().refreshAccessToken(refresh) }.getOrNull() ?: return false
+        val (token, newRefresh) = next
+        if (token.isBlank()) return false
+        accessToken = token
+        currentRefresh = newRefresh ?: refresh
+        onTokenRefreshed(token, currentRefresh)
+        runCatching { android.util.Log.d("NikConnect", "favorite token refreshed") }
+        return true
+    }
+
     private suspend fun ensureGuid() {
         // 登录时抓到的 guid 可能是从 URL 里猜的（方案 ID / bookId 都是 26 位 ULID，形态一样），
         // 拿它拼 /publicbook/ 会得到 422，所以这里每次都问一次 OIDC userinfo 拿权威值。
-        val identity = api().fetchIdentity()
-        if (identity.guid.isNotBlank()) accountGuid = identity.guid
+        val identity = runCatching { withSession { api().fetchIdentity() } }.getOrNull()
+        if (identity != null && identity.guid.isNotBlank()) accountGuid = identity.guid
     }
 
     private fun detailOf(e: Exception): String? {

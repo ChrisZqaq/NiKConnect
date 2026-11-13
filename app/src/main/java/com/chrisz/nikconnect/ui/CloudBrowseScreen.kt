@@ -146,6 +146,10 @@ internal fun CloudTab(
             onNext = { detail.nextId?.let(model::openDetail) },
             favoriteToken = cloudToken,
             favoriteGuid = cloudGuid,
+            favoriteRefreshToken = cloudRefreshToken,
+            onFavoriteTokenRefreshed = { refreshed, refreshedRefresh ->
+                onLogin(CloudAuthState(token = refreshed, guid = cloudGuid, refreshToken = refreshedRefresh))
+            },
             onNeedLogin = { loginStartUrl = CLOUD_INDEX_URL },
         )
 
@@ -507,6 +511,8 @@ private fun CloudRecipeDetailScreen(
     onNext: () -> Unit,
     favoriteToken: String?,
     favoriteGuid: String?,
+    favoriteRefreshToken: String? = null,
+    onFavoriteTokenRefreshed: (String, String?) -> Unit = { _, _ -> },
     onNeedLogin: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
@@ -565,6 +571,8 @@ private fun CloudRecipeDetailScreen(
                     guid = favoriteGuid,
                     onNeedLogin = onNeedLogin,
                     createdBy = detail.author,
+                    refreshToken = favoriteRefreshToken,
+                    onTokenRefreshed = onFavoriteTokenRefreshed,
                 )
 
                 if (detail.description.isNotBlank()) {
