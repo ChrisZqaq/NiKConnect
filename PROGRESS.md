@@ -511,6 +511,12 @@ else V().debug("newRecipeIdList length 0")   // ← 空数组根本不发请求
 - **请求日志**：`CloudHttp.send()` 每个请求写一行 `NikConnect` tag 日志（callId + method + url + 状态码 + 请求/响应前后 200 字），JVM 单测里用 `runCatching` 兜住桩 Log。配合 `adb logcat -s NikConnect` 定位，不必让用户截图。
 - **真机脚本**：`tools/dev/device.sh`（install/launch/shot/dump/logs/tap/text/cam-shot），`-r` 安装保留数据；`tools/dev/shots/` 已加 gitignore。
 
+## 2026-11-14 · 0.6.15：让排障不依赖用户截图
+
+- **原始报文落盘**：新增 `cloud/CloudDebug.kt`（仅 debuggable 构建启用），`CloudHttp` 每次请求写 `cacheDir/cloud_debug/<CALLID>-<code>-<ts>.{req,res}.txt`，只保留最近 40 个文件；排查「服务端返回什么结构」时用 `adb pull /sdcard/Android/data/com.chrisz.nikconnect.debug/cache/cloud_debug` 直接取，不必让用户截图。请求头不落盘，token 不会进文件。
+- **封面占位改成呼吸高光**：`CloudBrowseScreen.CoverPlaceholder()` 由静止渐变改为 `rememberInfiniteTransition` 驱动的斜向高光（1.4s 循环）。静止深色块会被误读为「加载失败」，动起来才像「在等图」。
+- 版本 `0.6.15-alpha`（vc 23），99 项 JVM 测试全绿，lint 0 error / 6 warning（既有项）。
+
 ## 开放问题
 
 1. 真实图库规模（120 / 300 / 更大）→ 决定 0.2 分页与批量元数据优先级。

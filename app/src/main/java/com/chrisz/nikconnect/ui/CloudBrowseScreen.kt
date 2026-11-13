@@ -1,6 +1,12 @@
 package com.chrisz.nikconnect.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -54,6 +60,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -386,17 +393,33 @@ private fun CloudRecipeCard(recipe: CloudRecipe, onClick: () -> Unit) {
     }
 }
 
+/**
+ * 封面未加载时的占位：一条缓慢呼吸的斜向高光。
+ *
+ * 静止的深色块会被当成「加载失败」，动起来才读得出「在等图」。
+ */
 @Composable
 private fun CoverPlaceholder() {
+    val transition = rememberInfiniteTransition(label = "cover")
+    val shift by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1_400, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "cover-shift",
+    )
+    val base = MaterialTheme.colorScheme.surfaceVariant
+    val highlight = MaterialTheme.colorScheme.surface
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(
                 Brush.linearGradient(
-                    listOf(
-                        MaterialTheme.colorScheme.surfaceVariant,
-                        MaterialTheme.colorScheme.surface,
-                    ),
+                    colors = listOf(base, highlight, base),
+                    start = Offset(shift * 900f - 300f, 0f),
+                    end = Offset(shift * 900f, 600f),
                 ),
             ),
     )

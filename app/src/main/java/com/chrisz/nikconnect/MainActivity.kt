@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import com.chrisz.nikconnect.cloud.CloudDebug
+import java.io.File
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -22,6 +24,11 @@ import com.chrisz.nikconnect.ui.NiKConnectTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 云创接口原始报文落盘（仅 debug），便于本地拉取排查；不影响 release 行为。
+        if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) {
+            CloudDebug.dir = File(cacheDir, "cloud_debug")
+            CloudDebug.enabled = true
+        }
         enableEdgeToEdge()
         setContent {
             NiKConnectTheme {

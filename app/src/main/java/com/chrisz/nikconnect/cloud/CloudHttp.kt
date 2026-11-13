@@ -150,6 +150,7 @@ internal class CloudHttp(
                 val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
                     ?.bufferedReader()?.use { it.readText() }.orEmpty()
                 log("$callId $method $url -> $code ${body?.take(200).orEmpty()} | ${text.take(200)}")
+                CloudDebug.record("$callId-$code", "$method $url\n${body.orEmpty()}", text)
                 if (code == 401 || code == 403) throw CloudException("$callId HTTP $code", httpStatus = code)
                 if (code !in 200..299) throw CloudException("$callId HTTP $code：${text.take(160)}", httpStatus = code)
                 return text
