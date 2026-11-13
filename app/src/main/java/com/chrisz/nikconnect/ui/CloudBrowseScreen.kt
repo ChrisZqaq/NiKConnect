@@ -64,7 +64,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.chrisz.nikconnect.cloud.CLOUD_CAMERA_URL
 import com.chrisz.nikconnect.cloud.CLOUD_INDEX_URL
 import com.chrisz.nikconnect.cloud.CloudParam
 import com.chrisz.nikconnect.cloud.CloudRecipe
@@ -101,9 +100,11 @@ internal fun CloudTab(
                 showAccount = false
                 onLogout()
             },
+            // 账号 ID 已由账号中心 userinfo 权威获取，不需要再去相机页「抓」：
+            // 这里只做「重新登录」，让失效的 token 换一张新的。
             onRecaptureGuid = {
                 showAccount = false
-                loginStartUrl = CLOUD_CAMERA_URL
+                loginStartUrl = CLOUD_INDEX_URL
             },
         )
         return

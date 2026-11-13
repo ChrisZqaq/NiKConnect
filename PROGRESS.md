@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-- **版本**：0.6.3-alpha（修 `IF_IR_R_C001` 422 根因：账号 ID 改由账号中心 Keycloak `userinfo` 权威获取，不再从 URL 嗅探 ULID；账号页显示账号 ID 明文；token 失效单独提示；JVM 70 项测试通过，真机待验）
+- **版本**：0.6.4-alpha（登录页极简化：去掉手动输入/复制/提取按钮，抓到 token 自动返回 App；账号 ID 已由 userinfo 权威获取，不再需要网页侧配合；JVM 70 项测试通过，真机待验）
 - **真机基线**：一加 Ace 5 Pro + Nikon Zf
 - **未关闭验证**：0.4 RAW 哈希/分块对照；0.5 遗留三项（在线刷新频控、详情参数与官网逐项对照、蜂窝网络封面流量）；0.6 相机列表与槽位接口的响应形状（真机未验，解析按特征嗅探 + 原始响应可截图）；0.6 批次 2（拖拽排布、收藏到书）未开工
 
@@ -338,6 +338,18 @@
 - `ui/CloudAccountViewModel.refreshCameras()` 改成两步：先 userinfo 拿权威 guid；401/403 直接判定「登录态已失效，退出重登」（不再拿错 guid 撞 422）；拿到 guid 就用它查相机，候选嗅探降级为最后退路。
 - `ui/CloudAccountScreen.kt` 新增 `GuidLine`（账号 ID 明文一行，可选中复制），出问题时用户能直接读值反馈；`GuidRefreshBar` 文案改「服务端不认这个账号 ID」+「退出重登」。
 - 测试：`CloudAccountClientTest` 新增 4 项（guid 声明、sub 兜底、无 guid 抛错、非对象抛错）。JVM 70 项全绿。
+
+## 2026-11-13 · 0.6.4：登录页极简化（自动返回）
+
+用户反馈：登录页上方堆了「手动输入」「复制 token」「再查一次」「自动捕获状态」等一堆东西，而且手机上根本没有 F12，手动输入这条路本来就不成立。
+
+- `ui/CloudLoginScreen.kt` 重写为「一个 WebView + 一行标题」：顶栏只有关闭按钮（48dp）与「登录尼康云创」。
+- `acceptToken()` 抓到 token 后立即 `completed = true` 并 `onDone(CloudAuthState)`——用户完成登录就自动回 App，不需要任何确认动作。
+- 删除：手动 token/guid 输入框、「使用该 token」、已捕获 token 的显示卡（含显示/隐藏、复制）、「再查一次」、「重新加载」常驻行、自动捕获状态行。
+- 保留：可信域白名单（`nikon.com.cn`/`nikon.com`/`nikonimaging.com`）过滤请求头与 URL；非 http(s) scheme 不加载；域外链接交系统浏览器；JWT/localStorage 兜底提取。
+- 仅在 **25 秒仍未抓到** 时出现一行灰字「完成登录后会自动返回」+「重新加载」，避免用户对着白屏干等。
+- 顺手移除 `settings.databaseEnabled = true`（deprecated，且 `domStorageEnabled` 已覆盖），避免新增 lint 警告。
+- 账号页「重新获取账号 ID」改语义为「重新登录」：账号 ID 现在由 userinfo 权威获取，不再需要去网页相机页抓值；`CLOUD_CAMERA_URL` 引用一并从浏览页删除。
 
 ## 开放问题
 
