@@ -346,7 +346,7 @@ private fun LibrarySection(state: CloudAccountState) {
     Spacer(Modifier.height(14.dp))
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
-            "收藏夹",
+            "我的收藏",
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.onBackground,
         )

@@ -211,7 +211,7 @@ private fun FavoriteSheet(
                             tint = MaterialTheme.colorScheme.primary,
                         )
                         Column {
-                            Text("收藏到我的收藏", style = MaterialTheme.typography.bodyLarge)
+                            Text("收藏这个方案", style = MaterialTheme.typography.bodyLarge)
                             Text(
                                 "之后可在相机槽位「＋」里选它",
                                 style = MaterialTheme.typography.labelSmall,
@@ -219,44 +219,11 @@ private fun FavoriteSheet(
                             )
                         }
                     }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline)
-                    if (state.books.isEmpty()) {
-                        Text(
-                            "还没有收藏夹。新建一个即可收藏。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(vertical = 8.dp),
-                        )
-                    }
-                    state.books.forEach { book ->
-                        BookRow(book = book, enabled = !state.working, onClick = { onPick(book) })
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outline)
-                    }
-                    if (state.canCreateBook) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 56.dp)
-                                .clickable(enabled = !state.working, onClick = onCreate)
-                                .padding(vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Icon(
-                                Icons.Filled.Add,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                                tint = MaterialTheme.colorScheme.primary,
-                            )
-                            Text("新建收藏夹并收藏", style = MaterialTheme.typography.bodyLarge)
+                    if (state.books.isNotEmpty()) {
+                        state.books.forEach { book ->
+                            BookRow(book = book, enabled = !state.working, onClick = { onPick(book) })
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outline)
                         }
-                    } else {
-                        Text(
-                            "一个账号最多 ${CloudBook.MAX_BOOKS} 个收藏夹，先在网页端删一个。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.padding(vertical = 8.dp),
-                        )
                     }
                 }
             }
