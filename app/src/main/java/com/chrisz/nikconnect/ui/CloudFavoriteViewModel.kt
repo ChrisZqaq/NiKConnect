@@ -24,7 +24,9 @@ internal data class CloudFavoriteState(
     val loading: Boolean = false,
     val error: String? = null,
     val working: Boolean = false,
+    val phase: String? = null,
     val notice: String? = null,
+    val detail: String? = null,
 ) {
     val canCreateBook: Boolean get() = books.size < CloudBook.MAX_BOOKS
 }
@@ -54,6 +56,7 @@ internal class CloudFavoriteViewModel(
         _state.update { it.copy(loading = true, error = null) }
         viewModelScope.launch {
             try {
+                ensureGuid()
                 val mine = client().fetchMyRecipes()
                 _state.update {
                     it.copy(
@@ -62,8 +65,8 @@ internal class CloudFavoriteViewModel(
                         loading = false,
                     )
                 }
-            } catch (e: CloudException) {
-                _state.update { it.copy(loading = false, error = describe(e, "IF_FR100_H05")) }
+            } catch (e: Exception) {
+                _state.update { it.copy(loading = false, error = describe(e, "IF_FR100_H05"), detail = detailOf(e)) }
             }
         }
     }
@@ -79,13 +82,15 @@ internal class CloudFavoriteViewModel(
             _state.update { it.copy(error = "《${book.label}》已满 ${CloudBook.MAX_RECIPES_PER_BOOK} 个方案，换一个收藏夹或新建。") }
             return
         }
-        _state.update { it.copy(working = true, error = null) }
+        _state.update { it.copy(working = true, error = null, detail = null, phase = "正在收藏…") }
         viewModelScope.launch {
             try {
+                ensureGuid()
                 val created = client().favoriteRecipes(book.id, listOf(recipeId))
                 _state.update {
                     it.copy(
                         working = false,
+                        phase = null,
                         notice = if (created.isEmpty()) {
                             "已收藏到《${book.label}》"
                         } else {
@@ -94,8 +99,10 @@ internal class CloudFavoriteViewModel(
                     )
                 }
                 refreshBooksQuietly()
-            } catch (e: CloudException) {
-                _state.update { it.copy(working = false, error = describe(e, "IF_IR_R_PR001")) }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(working = false, phase = null, error = describe(e, "IF_IR_R_PR001"), detail = detailOf(e))
+                }
             }
         }
     }
@@ -107,14 +114,17 @@ internal class CloudFavoriteViewModel(
             _state.update { it.copy(error = "一个账号最多 ${CloudBook.MAX_BOOKS} 个收藏夹，先在网页端删一个。") }
             return
         }
-        _state.update { it.copy(working = true, error = null) }
+        _state.update { it.copy(working = true, error = null, detail = null, phase = "正在新建收藏夹…") }
         viewModelScope.launch {
             try {
+                ensureGuid()
                 val bookId = client().createBook(name)
+                _state.update { it.copy(phase = "正在把方案放进新收藏夹…") }
                 val created = client().favoriteRecipes(bookId, listOf(recipeId))
                 _state.update {
                     it.copy(
                         working = false,
+                        phase = null,
                         notice = if (created.isEmpty()) {
                             "已新建《$name》并收藏"
                         } else {
@@ -123,14 +133,31 @@ internal class CloudFavoriteViewModel(
                     )
                 }
                 refreshBooksQuietly()
-            } catch (e: CloudException) {
-                _state.update { it.copy(working = false, error = describe(e, "IF_IR_R_PB002")) }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(working = false, phase = null, error = describe(e, "IF_IR_R_PB002"), detail = detailOf(e))
+                }
             }
         }
     }
 
     fun clearError() {
-        _state.update { it.copy(error = null) }
+        _state.update { it.copy(error = null, detail = null) }
+    }
+
+    /**
+     * 收藏接口的路径里带账号 guid；登录时可能只抓到 token，所以这里先向 OIDC userinfo
+     * 要一次权威 guid（`GET .../protocol/openid-connect/userinfo`），避免拼出空段 URL。
+     */
+    private suspend fun ensureGuid() {
+        if (accountGuid.isNotBlank()) return
+        val identity = CloudAccountClient(accessToken = accessToken, guid = "").fetchIdentity()
+        accountGuid = identity.guid
+    }
+
+    private fun detailOf(e: Exception): String? {
+        val raw = e.message.orEmpty()
+        return raw.takeIf { it.isNotBlank() }?.let { "详情：$it" }
     }
 
     fun consumeNotice() {
@@ -147,10 +174,11 @@ internal class CloudFavoriteViewModel(
 
     private fun client() = CloudAccountClient(accessToken = accessToken, guid = accountGuid)
 
-    private fun describe(e: CloudException, callId: String): String = when {
-        e.errorCode.isNotBlank() -> "$callId 返回 ${e.errorCode}"
-        e.httpStatus == 401 || e.httpStatus == 403 -> "$callId 认证失败（${e.httpStatus}）：重新登录一次云创"
-        else -> "$callId：${e.message.orEmpty()}"
+    private fun describe(e: Throwable, callId: String): String = when {
+        e is CloudException && e.errorCode.isNotBlank() -> "$callId 返回 ${e.errorCode}"
+        e is CloudException && (e.httpStatus == 401 || e.httpStatus == 403) ->
+            "$callId 认证失败（${e.httpStatus}）：重新登录一次云创"
+        else -> "$callId：${e.message.orEmpty().ifBlank { e::class.simpleName.orEmpty() }}"
     }
 
     private companion object {

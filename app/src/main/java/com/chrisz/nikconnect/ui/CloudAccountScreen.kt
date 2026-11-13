@@ -27,7 +27,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -377,7 +378,7 @@ private fun SlotSection(
 
         if (editing) {
             Text(
-                "长按拖动换位 · 点空槽位的「＋」从可分配池挑方案 · 保存后相机联网时会重新拉取。删除在非编辑态用行尾垃圾桶（立即生效）",
+                "↑↓ 一格格挪位，也可长按整行拖动 · 点空槽位的「＋」从可分配池挑方案 · 保存后相机联网时会重新拉取。删除在非编辑态用行尾垃圾桶（立即生效）",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -456,11 +457,38 @@ private fun SlotSection(
                             Icon(Icons.Default.Add, contentDescription = "为该槽位添加方案")
                         }
                     } else {
-                        Icon(
-                            Icons.Default.Menu,
-                            contentDescription = "长按拖动",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        // 拖动不是唯一手段：真机上"跨两格拖动"经常被父级滚动吃掉，
+                        // 所以每行都给上/下移按钮，一格格挪过去，行为完全确定。
+                        IconButton(
+                            onClick = { onMove(position, position - 1) },
+                            enabled = position > 0,
+                            modifier = Modifier.size(40.dp),
+                        ) {
+                            Icon(
+                                Icons.Default.KeyboardArrowUp,
+                                contentDescription = "上移一位",
+                                tint = if (position > 0) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                                },
+                            )
+                        }
+                        IconButton(
+                            onClick = { onMove(position, position + 1) },
+                            enabled = position < rows.lastIndex,
+                            modifier = Modifier.size(40.dp),
+                        ) {
+                            Icon(
+                                Icons.Default.KeyboardArrowDown,
+                                contentDescription = "下移一位",
+                                tint = if (position < rows.lastIndex) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                                },
+                            )
+                        }
                     }
                 } else if (slot.occupied) {
                     if (state.deleting == slot.recipeId) {

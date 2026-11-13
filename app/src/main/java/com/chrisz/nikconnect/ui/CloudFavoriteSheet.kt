@@ -1,6 +1,7 @@
 package com.chrisz.nikconnect.ui
 
 import android.widget.Toast
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -32,6 +33,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -81,6 +83,7 @@ internal fun CloudFavoriteBar(
         state.notice?.let {
             Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
             model.consumeNotice()
+            sheetOpen = false
         }
     }
 
@@ -101,14 +104,8 @@ internal fun CloudFavoriteBar(
             recipeId = recipeId,
             recipeName = recipeName,
             state = state,
-            onPick = { book ->
-                model.favoriteInto(recipeId, book)
-                sheetOpen = false
-            },
-            onCreate = {
-                model.createBookAndFavorite(recipeId)
-                sheetOpen = false
-            },
+            onPick = { book -> model.favoriteInto(recipeId, book) },
+            onCreate = { model.createBookAndFavorite(recipeId) },
             onRetry = model::loadBooks,
             onDismiss = {
                 model.clearError()
@@ -142,6 +139,34 @@ private fun FavoriteSheet(
                 modifier = Modifier.padding(bottom = 8.dp),
             )
 
+            state.phase?.let { phase ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Text(
+                        phase,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            state.detail?.let { detail ->
+                Text(
+                    detail,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(10.dp),
+                )
+            }
+
             when {
                 state.loading -> Row(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
@@ -167,7 +192,7 @@ private fun FavoriteSheet(
                         )
                     }
                     state.books.forEach { book ->
-                        BookRow(book = book, onClick = { onPick(book) })
+                        BookRow(book = book, enabled = !state.working, onClick = { onPick(book) })
                         HorizontalDivider(color = MaterialTheme.colorScheme.outline)
                     }
                     if (state.canCreateBook) {
@@ -175,7 +200,7 @@ private fun FavoriteSheet(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .heightIn(min = 56.dp)
-                                .clickable(onClick = onCreate)
+                                .clickable(enabled = !state.working, onClick = onCreate)
                                 .padding(vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -210,7 +235,7 @@ private fun FavoriteSheet(
 }
 
 @Composable
-private fun BookRow(book: CloudBook, onClick: () -> Unit) {
+private fun BookRow(book: CloudBook, enabled: Boolean = true, onClick: () -> Unit) {
     val full = book.recipeCount >= CloudBook.MAX_RECIPES_PER_BOOK
     Surface(
         color = MaterialTheme.colorScheme.surface,
@@ -218,7 +243,7 @@ private fun BookRow(book: CloudBook, onClick: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 56.dp)
-            .clickable(enabled = !full, onClick = onClick),
+            .clickable(enabled = enabled && !full, onClick = onClick),
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 4.dp, vertical = 12.dp),
