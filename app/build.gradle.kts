@@ -13,8 +13,8 @@ android {
         applicationId = "com.chrisz.nikconnect"
         minSdk = 29
         targetSdk = 35
-        versionCode = 21
-        versionName = "0.6.13-alpha"
+        versionCode = 22
+        versionName = "0.6.14-alpha"
     }
 
     buildTypes {
@@ -65,4 +65,5 @@ dependencies {
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
 }

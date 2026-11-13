@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-- **版本**：0.6.13-alpha（0.6 批次 2：`moveSlot` 重排槽位号修掉「排布没有变化」；建夹改 text/plain 并 400/422 回退 JSON；收藏路径每次用 OIDC userinfo 取权威 guid；JVM 93 项测试通过）
+- **版本**：0.6.14-alpha（云创 token 用 Keystore AES-GCM 加密持久化，重装/重启免重登；`CloudAccountApi` 抽接口让收藏状态机进 JVM 测试（99 项）；`CloudHttp` 每次请求写一行 `NikConnect` 日志；新增 `tools/dev/device.sh` 真机自动化脚本）
 - **真机基线**：一加 Ace 5 Pro + Nikon Zf
 - **未关闭验证**：0.6.9 删除后位置保持、重新加回不再 400；0.6.10 收藏官方方案后能否在账号页「＋」里挑到并排进槽位（均待用户真机验证）；0.4 RAW 哈希/分块对照；0.5 遗留三项（在线刷新频控、详情参数与官网逐项对照、蜂窝网络封面流量）；0.6 只读部分的细节项（槽位号与网页端逐位对照、已占用/空位区分、可分配方案数、token 长时失效）见 [docs/acceptance/0.6.md](docs/acceptance/0.6.md)；0.6 批次 2（拖拽排布、收藏到书）未开工
 
@@ -501,6 +501,15 @@ else V().debug("newRecipeIdList length 0")   // ← 空数组根本不发请求
 - `createBook()` 先按 `text/plain;charset=UTF-8` 发（与 Web 一致），仅当回 400/422 时补一次 `application/json`。
 - `CloudFavoriteViewModel.ensureGuid()` 改为**每次**都向 `GET .../protocol/openid-connect/userinfo` 取权威 guid（不再"有值就跳过"），彻底避开嗅探值。
 - 新增 JVM 测试 2 项：`moveSlot` 重排后 `planSlotWrite` 必须产出 `assignments`（含 `slotNo` 1/2）、空槽位搬迁后占用位置为 3/4。测试总数 93。
+
+## 2026-11-14 · 0.6.14：让测试从「每次手动装」变成「能自动跑」
+
+用户 m05829/m05844 要求减少手动装机的往返，开工自动化：
+
+- **登录态持久化**：新增 `cloud/SecureTokenStore.kt`——Android Keystore 里的 AES-256/GCM 密钥加密 token，密文（IV+body，Base64）存 `ui_prefs/cloud_token_enc`；`MainViewModel` 启动时 `tokenStore.load()`，登录时 `save()`，退出时 `clear()`。解不开（换机、清数据、Keystore 失效）就返回 null 并清掉坏数据，退回登录页，不崩。`adb install -r` 现在不会丢登录态。
+- **可测性**：新增 `cloud/CloudAccountApi.kt`（`fetchIdentity`/`fetchMyRecipes`/`favoriteRecipes`/`createBook`），`CloudAccountClient` 实现它；`CloudFavoriteViewModel` 构造器接受 `apiFactory`，默认仍造真实 client。新增 `test/.../ui/CloudFavoriteViewModelTest.kt` 6 项（成功通知、`PB002` 422 留痕、`PR001` 错误码、权威 guid 覆盖可疑 guid、书列表加载、userinfo 401 也会变成可见错误），依赖新增 `kotlinx-coroutines-test:1.8.1`。测试总数 93 → 99。
+- **请求日志**：`CloudHttp.send()` 每个请求写一行 `NikConnect` tag 日志（callId + method + url + 状态码 + 请求/响应前后 200 字），JVM 单测里用 `runCatching` 兜住桩 Log。配合 `adb logcat -s NikConnect` 定位，不必让用户截图。
+- **真机脚本**：`tools/dev/device.sh`（install/launch/shot/dump/logs/tap/text/cam-shot），`-r` 安装保留数据；`tools/dev/shots/` 已加 gitignore。
 
 ## 开放问题
 

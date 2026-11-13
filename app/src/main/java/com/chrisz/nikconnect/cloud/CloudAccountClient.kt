@@ -144,7 +144,7 @@ internal class CloudAccountClient(
     private val guid: String,
     private val country: String = "CN",
     private val http: CloudHttp = CloudHttp.shared,
-) {
+) : CloudAccountApi {
     private val bearer = mapOf("Authorization" to "Bearer $accessToken")
 
     /**
@@ -153,7 +153,7 @@ internal class CloudAccountClient(
      * 这是 Web 端拿 `guid` 的原路径（`_app` chunk：`keycloak.loadUserInfo()` 之后
      * `guid = e.guid`），比从请求 URL 里猜 ULID 可靠得多——账号页 422 的根因就是猜。
      */
-    suspend fun fetchIdentity(): CloudIdentity = withContext(Dispatchers.IO) {
+    override suspend fun fetchIdentity(): CloudIdentity = withContext(Dispatchers.IO) {
         val raw = http.get("$AUTH_HOST/protocol/openid-connect/userinfo", bearer, "OIDC_USERINFO")
         parseIdentity(raw)
     }
@@ -230,7 +230,7 @@ internal class CloudAccountClient(
      * 这是「账号里有什么」的真身，也是收藏的目标容器：一个书最多 200 个方案、
      * 一个账号最多 10 本书（Web 端 `disabled: e.book.length >= 10` 与 `recipeCount >= 200`）。
      */
-    suspend fun fetchMyRecipes(): CloudMyRecipes = withContext(Dispatchers.IO) {
+    override suspend fun fetchMyRecipes(): CloudMyRecipes = withContext(Dispatchers.IO) {
         val raw = http.post(
             "$CWP_HOST/bff/recipe",
             """{"filter":{},"country":"$country","lang_code":"zh-CN"}""",
@@ -246,7 +246,7 @@ internal class CloudAccountClient(
      * Web 端：`{method:"POST", headers:{Authorization: Bearer}, body:{bookId, recipeIds}}`，
      * 返回体里的 `recipeIds` 是新建出来的本地方案 ID（与官方方案 ID 不同）。
      */
-    suspend fun favoriteRecipes(bookId: String, recipeIds: List<String>): List<String> =
+    override suspend fun favoriteRecipes(bookId: String, recipeIds: List<String>): List<String> =
         withContext(Dispatchers.IO) {
             val raw = http.post(
                 "$IR_HOST/publicrecipe/$guid",
@@ -266,7 +266,7 @@ internal class CloudAccountClient(
      * 没有显式 Content-Type —— fetch 对字符串 body 默认发 `text/plain;charset=UTF-8`。
      * 所以我们先按 text/plain 发；只有服务端回 400/422 时才补一次 `application/json`。
      */
-    suspend fun createBook(name: String): String = withContext(Dispatchers.IO) {
+    override suspend fun createBook(name: String): String = withContext(Dispatchers.IO) {
         val body = buildBookBody(name)
         val raw = try {
             http.post("$IR_HOST/publicbook/$guid", body, bearer, "IF_IR_R_PB002")

@@ -2,6 +2,7 @@ package com.chrisz.nikconnect.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.chrisz.nikconnect.cloud.CloudAccountApi
 import com.chrisz.nikconnect.cloud.CloudAccountClient
 import com.chrisz.nikconnect.cloud.CloudBook
 import com.chrisz.nikconnect.cloud.CloudException
@@ -34,6 +35,8 @@ internal data class CloudFavoriteState(
 internal class CloudFavoriteViewModel(
     token: String,
     guid: String?,
+    private val apiFactory: (token: String, guid: String) -> CloudAccountApi =
+        { t, g -> CloudAccountClient(accessToken = t, guid = g) },
 ) : ViewModel() {
     private var accessToken: String = token
     private var accountGuid: String = guid.orEmpty()
@@ -57,7 +60,7 @@ internal class CloudFavoriteViewModel(
         viewModelScope.launch {
             try {
                 ensureGuid()
-                val mine = client().fetchMyRecipes()
+                val mine = api().fetchMyRecipes()
                 _state.update {
                     it.copy(
                         books = mine.books,
@@ -86,7 +89,7 @@ internal class CloudFavoriteViewModel(
         viewModelScope.launch {
             try {
                 ensureGuid()
-                val created = client().favoriteRecipes(book.id, listOf(recipeId))
+                val created = api().favoriteRecipes(book.id, listOf(recipeId))
                 _state.update {
                     it.copy(
                         working = false,
@@ -118,9 +121,9 @@ internal class CloudFavoriteViewModel(
         viewModelScope.launch {
             try {
                 ensureGuid()
-                val bookId = client().createBook(name)
+                val bookId = api().createBook(name)
                 _state.update { it.copy(phase = "正在把方案放进新收藏夹…") }
-                val created = client().favoriteRecipes(bookId, listOf(recipeId))
+                val created = api().favoriteRecipes(bookId, listOf(recipeId))
                 _state.update {
                     it.copy(
                         working = false,
@@ -152,7 +155,7 @@ internal class CloudFavoriteViewModel(
     private suspend fun ensureGuid() {
         // 登录时抓到的 guid 可能是从 URL 里猜的（方案 ID / bookId 都是 26 位 ULID，形态一样），
         // 拿它拼 /publicbook/ 会得到 422，所以这里每次都问一次 OIDC userinfo 拿权威值。
-        val identity = CloudAccountClient(accessToken = accessToken, guid = accountGuid).fetchIdentity()
+        val identity = api().fetchIdentity()
         if (identity.guid.isNotBlank()) accountGuid = identity.guid
     }
 
@@ -167,13 +170,13 @@ internal class CloudFavoriteViewModel(
 
     private fun refreshBooksQuietly() {
         viewModelScope.launch {
-            runCatching { client().fetchMyRecipes() }.onSuccess { mine ->
+            runCatching { api().fetchMyRecipes() }.onSuccess { mine ->
                 _state.update { it.copy(books = mine.books, recipeCount = mine.recipeCount) }
             }
         }
     }
 
-    private fun client() = CloudAccountClient(accessToken = accessToken, guid = accountGuid)
+    private fun api(): CloudAccountApi = apiFactory(accessToken, accountGuid)
 
     private fun describe(e: Throwable, callId: String): String = when {
         e is CloudException && e.errorCode.isNotBlank() -> "$callId 返回 ${e.errorCode}"

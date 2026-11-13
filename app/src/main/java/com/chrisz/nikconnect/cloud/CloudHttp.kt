@@ -149,17 +149,29 @@ internal class CloudHttp(
                 val code = conn.responseCode
                 val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
                     ?.bufferedReader()?.use { it.readText() }.orEmpty()
+                log("$callId $method $url -> $code ${body?.take(200).orEmpty()} | ${text.take(200)}")
                 if (code == 401 || code == 403) throw CloudException("$callId HTTP $code", httpStatus = code)
                 if (code !in 200..299) throw CloudException("$callId HTTP $code：${text.take(160)}", httpStatus = code)
                 return text
             } catch (e: CloudException) {
                 throw e
             } catch (e: Exception) {
+                log("$callId $method $url -> 网络失败：${e.message}")
                 throw CloudException("$callId 网络失败：${e.message}")
             } finally {
                 conn.disconnect()
             }
         }
+    }
+
+    /**
+     * 请求/响应的单行日志（含状态码与前后 200 字）。
+     *
+     * 作用：真机出问题时 `adb logcat -s NikConnect` 就能看到是哪个 callId、什么状态码、
+     * 服务端说了什么，不必让用户截图。JVM 单测里 android.util.Log 是桩，`runCatching` 兜住。
+     */
+    private fun log(line: String) {
+        runCatching { android.util.Log.d("NikConnect", line) }
     }
 
     /** 单调时钟：系统时间被改动时不会把间隔算错。 */

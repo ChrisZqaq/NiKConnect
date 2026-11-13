@@ -13,3 +13,5 @@ reference/
 # Python
 __pycache__/
 *.pyc
+
+tools/dev/shots/

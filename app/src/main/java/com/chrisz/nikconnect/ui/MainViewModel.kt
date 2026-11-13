@@ -8,6 +8,7 @@ import android.util.LruCache
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.chrisz.nikconnect.camera.CameraRepository
+import com.chrisz.nikconnect.cloud.SecureTokenStore
 import com.chrisz.nikconnect.camera.PhotoDownloader
 import com.chrisz.nikconnect.camera.ConnectionKeeperService
 import com.chrisz.nikconnect.ptp.DeviceInfo
@@ -52,7 +53,7 @@ internal data class UiState(
     /** MediaStore Pictures/NiKConnect 中已存在的文件名（跨会话已下载标记）。 */
     val downloadedFilenames: Set<String> = emptySet(),
     val downloads: List<DownloadItem> = emptyList(),
-    /** 尼康云创登录态：token 仅驻留内存，guid 可持久化到 ui_prefs。 */
+    /** 尼康云创登录态：token 用 Keystore 加密后持久化（[SecureTokenStore]），guid 明文存 ui_prefs。 */
     val cloudToken: String? = null,
     val cloudGuid: String? = null,
 ) {
@@ -68,11 +69,12 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     private val sessions = SessionController()
     private val thumbnailCache = LruCache<Long, ByteArray>(24)
     private val prefs = application.getSharedPreferences("ui_prefs", Context.MODE_PRIVATE)
+    private val tokenStore = SecureTokenStore(application)
     private val _state = MutableStateFlow(
         UiState(
             galleryViewTier = prefs.getInt("gallery_view_tier", 0),
             lastHost = prefs.getString("last_host", null),
-            cloudToken = null,
+            cloudToken = tokenStore.load(),
             cloudGuid = prefs.getString("cloud_guid", null),
         ),
     )
@@ -132,15 +134,17 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         observeQueue(downloadQueue)
     }
 
-    /** 云创登录完成（WebView 抓取或手动粘贴）。token 不持久化，guid 可保留到本地。 */
+    /** 云创登录完成（WebView 拦截请求头抓取）。token 加密后持久化，guid 明文存本地。 */
     fun onCloudLogin(state: CloudAuthState) {
         prefs.edit().remove("cloud_token").apply()
         state.guid?.let { prefs.edit().putString("cloud_guid", it).apply() }
+        state.token?.takeIf { it.isNotBlank() }?.let { tokenStore.save(it) }
         _state.update { it.copy(cloudToken = state.token, cloudGuid = state.guid ?: it.cloudGuid) }
     }
 
     fun cloudLogout() {
         prefs.edit().remove("cloud_token").remove("cloud_guid").apply()
+        tokenStore.clear()
         _state.update { it.copy(cloudToken = null, cloudGuid = null) }
     }
 
