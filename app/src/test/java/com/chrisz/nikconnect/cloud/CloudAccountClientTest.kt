@@ -159,4 +159,16 @@ class CloudAccountClientTest {
     fun `identity rejects non object`() {
         assertThrows(CloudException::class.java) { client().parseIdentity("""[{"guid":"01JD7Z5Q9W3T6K2M4N8P0R5SYV"}]""") }
     }
+
+    // ---- 真机实测形状（2026-11-13） ----
+
+    @Test
+    fun `real camera payload uses deviceId`() {
+        // C001 真身：{"cameras":[{"deviceId":"01JTC8JSRZAW1B2FZZYGF8GYBW","name":"Zf","serialNo":"8032632…"}]}
+        val raw = """{"cameras":[{"deviceId":"01JTC8JSRZAW1B2FZZYGF8GYBW","name":"Zf","serialNo":"8032632","custProductMngNo":"1","productUrl":"https://imagingcloud.nikon.com.cn/img/x.png"}]}"""
+        val camera = client().parseCameras(raw).single()
+        assertEquals("01JTC8JSRZAW1B2FZZYGF8GYBW", camera.id)
+        assertEquals("Zf", camera.name)
+        assertEquals("8032632", camera.serial)
+    }
 }

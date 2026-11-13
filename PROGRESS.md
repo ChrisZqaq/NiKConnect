@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-- **版本**：0.6.4-alpha（登录页极简化：去掉手动输入/复制/提取按钮，抓到 token 自动返回 App；账号 ID 已由 userinfo 权威获取，不再需要网页侧配合；JVM 70 项测试通过，真机待验）
+- **版本**：0.6.5-alpha（C001 相机列表按真身校准：主键是 `deviceId` 不是 `id`/`cameraId`，新增序列号展示；422 已消失，账号 ID 走 userinfo 的方案在真机成立；JVM 71 项测试通过）
 - **真机基线**：一加 Ace 5 Pro + Nikon Zf
 - **未关闭验证**：0.4 RAW 哈希/分块对照；0.5 遗留三项（在线刷新频控、详情参数与官网逐项对照、蜂窝网络封面流量）；0.6 相机列表与槽位接口的响应形状（真机未验，解析按特征嗅探 + 原始响应可截图）；0.6 批次 2（拖拽排布、收藏到书）未开工
 
@@ -350,6 +350,23 @@
 - 仅在 **25 秒仍未抓到** 时出现一行灰字「完成登录后会自动返回」+「重新加载」，避免用户对着白屏干等。
 - 顺手移除 `settings.databaseEnabled = true`（deprecated，且 `domStorageEnabled` 已覆盖），避免新增 lint 警告。
 - 账号页「重新获取账号 ID」改语义为「重新登录」：账号 ID 现在由 userinfo 权威获取，不再需要去网页相机页抓值；`CLOUD_CAMERA_URL` 引用一并从浏览页删除。
+
+## 2026-11-13 · 0.6.5：C001 真身校准（`deviceId`）
+
+真机回报：
+
+```
+IF_IR_R_C001 返回的相机列表结构无法识别（255 字节）：
+{"cameras":[{"deviceId":"01JTC8JSRZAW1B2FZZYGF8GYBW","name":"Zf","serialNo":"8032632…",
+ "custProductMngNo":"1","productUrl":"https://imagingcloud.nikon.com.cn/img…"}]}
+```
+
+- **422 已经消失**：0.6.3 的「账号 ID 走 Keycloak userinfo」在真机成立，之前的 sniffing 就是错的那条路。
+- 新问题纯粹是解析：相机对象主键叫 **`deviceId`**，我之前只认 `id`/`cameraId`，于是"结构无法识别"。
+- `cloud/CloudAccountClient.kt`：`CloudCamera` 新增 `serial: String = ""`；`parseCameras` 的 `mustHave` 顺序改为 `deviceId` → `id` → `cameraId` → `device_id`，id 取值同理；`serial` 取 `serialNo`/`serial_no`/`serialNumber`/`serial`。
+- 槽位解析同步放宽：`SLOT_KEYS` 追加 `pictureControls`/`pictureControl`/`controlList`，`mustHave` 追加 `recipeId`（C002 真身还没见到，先放宽再按真身校准）。
+- `ui/CloudAccountScreen.kt` 相机行副标题改为 `型号 · SN 8032632 · 01JTC8JS`（能直接对上机身序列号，方便确认是哪台机器）。
+- 测试：新增「real camera payload uses deviceId」1 项，JVM 71 项全绿。
 
 ## 开放问题
 

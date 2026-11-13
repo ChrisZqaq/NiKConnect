@@ -11,6 +11,7 @@ internal data class CloudCamera(
     val id: String,
     val name: String,
     val model: String,
+    val serial: String = "",
 )
 
 /**
@@ -88,16 +89,21 @@ internal class CloudAccountClient(
 
     fun parseCameras(raw: String): List<CloudCamera> {
         val element = http.parseElement(raw, "IF_IR_R_C001")
-        val arr = http.findObjectArray(element, CAMERA_KEYS, mustHave = "id")
+        // 真机实测（2026-11-13）：`{"cameras":[{"deviceId":"01JTC8...","name":"Zf","serialNo":"8032632…"}]}`
+        // —— 主键叫 deviceId，不是 id/cameraId。这是 C001 的第一份真身，按它校准。
+        val arr = http.findObjectArray(element, CAMERA_KEYS, mustHave = "deviceId")
+            ?: http.findObjectArray(element, CAMERA_KEYS, mustHave = "id")
             ?: http.findObjectArray(element, CAMERA_KEYS, mustHave = "cameraId")
+            ?: http.findObjectArray(element, CAMERA_KEYS, mustHave = "device_id")
             ?: emptyArrayOrFail(element, raw, "IF_IR_R_C001", "相机列表")
         return arr.mapNotNull { el ->
             val o = el as? JsonObject ?: return@mapNotNull null
-            val id = o.str("id") ?: o.str("cameraId") ?: return@mapNotNull null
+            val id = firstNonBlank(o, "deviceId", "device_id", "id", "cameraId") ?: return@mapNotNull null
             CloudCamera(
                 id = id,
                 name = firstNonBlank(o, "name", "cameraName", "nickname", "displayName").orEmpty(),
                 model = firstNonBlank(o, "model", "modelName", "productName", "cameraModel").orEmpty(),
+                serial = firstNonBlank(o, "serialNo", "serial_no", "serialNumber", "serial").orEmpty(),
             )
         }
     }
@@ -106,6 +112,7 @@ internal class CloudAccountClient(
         val element = http.parseElement(raw, "IF_IR_R_C002")
         val arr = http.findObjectArray(element, SLOT_KEYS, mustHave = "pictureControlName")
             ?: http.findObjectArray(element, SLOT_KEYS, mustHave = "exist")
+            ?: http.findObjectArray(element, SLOT_KEYS, mustHave = "recipeId")
             ?: http.findObjectArray(element, SLOT_KEYS, mustHave = "id")
             ?: emptyArrayOrFail(element, raw, "IF_IR_R_C002", "槽位")
         return arr.mapIndexedNotNull { index, el ->
@@ -144,11 +151,6 @@ internal class CloudAccountClient(
         }
     }
 
-    /**
-     * 找不到对象数组时区分两种情形：
-     * 1) 响应本身就是空数组/空列表 → 真的没有数据，返回空；
-     * 2) 其它形状 → 结构变了或解析规则不对，抛错并带原始片段，别把「不认识」说成「账号是空的」。
-     */
     fun parseIdentity(raw: String): CloudIdentity {
         val element = http.parseElement(raw, "OIDC_USERINFO")
         val o = element as? JsonObject
@@ -167,6 +169,11 @@ internal class CloudAccountClient(
         )
     }
 
+    /**
+     * 找不到对象数组时区分两种情形：
+     * 1) 响应本身就是空数组/空列表 → 真的没有数据，返回空；
+     * 2) 其它形状 → 结构变了或解析规则不对，抛错并带原始片段，别把「不认识」说成「账号是空的」。
+     */
     private fun emptyArrayOrFail(
         element: JsonElement,
         raw: String,
@@ -194,7 +201,10 @@ internal class CloudAccountClient(
 
     companion object {
         private val CAMERA_KEYS = listOf("cameraList", "cameras", "camera", "list", "items")
-        private val SLOT_KEYS = listOf("recipes", "recipe", "cameraRecipes", "slots", "cameraSlots", "list", "items")
+        private val SLOT_KEYS = listOf(
+            "recipes", "recipe", "cameraRecipes", "slots", "cameraSlots",
+            "pictureControls", "pictureControl", "controlList", "list", "items",
+        )
         private val ASSIGNABLE_KEYS = listOf("recipe", "recipes", "list", "items", "cameraRecipes")
     }
 }

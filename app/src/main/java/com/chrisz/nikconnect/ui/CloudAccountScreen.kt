@@ -193,7 +193,11 @@ private fun CameraSection(
                                 style = MaterialTheme.typography.bodyLarge,
                                 fontWeight = FontWeight.SemiBold,
                             )
-                            val sub = listOf(camera.model, camera.id).filter { it.isNotBlank() }.joinToString(" · ")
+                            val sub = buildList {
+                                if (camera.model.isNotBlank()) add(camera.model)
+                                if (camera.serial.isNotBlank()) add("SN ${camera.serial}")
+                                add(camera.id.take(8))
+                            }.joinToString(" · ")
                             if (sub.isNotBlank()) {
                                 Text(
                                     sub,
