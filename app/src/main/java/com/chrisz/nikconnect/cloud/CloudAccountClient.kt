@@ -110,6 +110,15 @@ internal data class CloudMyRecipes(
     val books: List<CloudBook> = emptyList(),
     val recipeCount: Int = 0,
     val authority: Int = 0,
+    val recipes: List<OwnedRecipe> = emptyList(),
+)
+
+/** 账号里的一份方案副本（属于某个收藏夹，或未归类）。 */
+internal data class OwnedRecipe(
+    val id: String,
+    val name: String,
+    val pictureControlName: String = "",
+    val bookId: String? = null,
 )
 
 /**
@@ -378,23 +387,49 @@ internal class CloudAccountClient(
         val element = http.parseElement(raw, "IF_FR100_H05")
         val root = element as? JsonObject
             ?: throw CloudException("IF_FR100_H05 返回的不是对象：${raw.take(160)}", httpStatus = -2)
-        val booksArray = (root["books"] as? JsonArray)
+        val directBooks = (root["books"] as? JsonArray)
+            ?: (root["bookList"] as? JsonArray)
+            ?: (root["book"] as? JsonArray)
+        val booksArray = directBooks
             ?: http.findObjectArray(element, BOOK_KEYS, mustHave = "id")
             ?: JsonArray(emptyList())
         val books = booksArray.mapNotNull { el ->
             val o = el as? JsonObject ?: return@mapNotNull null
             val id = o.str("id")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            CloudBook(
-                id = id,
-                label = firstNonBlank(o, "label", "name", "bookName", "book_name").orEmpty(),
-                recipeCount = o.int("recipeCount") ?: o.int("recipe_count") ?: 0,
-            )
+            val label = firstNonBlank(o, "label", "name", "bookName", "book_name").orEmpty()
+            val count = o.int("recipeCount") ?: o.int("recipe_count")
+            // 兜底嗅探可能抓到方案数组（元素形如 {"id","name"}）：显式 book 键之外，
+            // 必须带书名字段或计数才算书，否则会把方案当收藏夹。
+            if (directBooks == null) {
+                val bookishLabel = firstNonBlank(o, "label", "bookName", "book_name")
+                if (bookishLabel.isNullOrBlank() && count == null) return@mapNotNull null
+            }
+            CloudBook(id = id, label = label, recipeCount = count ?: 0)
         }
-        val recipes = (root["allLocalRecipes"] as? JsonArray) ?: (root["localRecipes"] as? JsonArray)
+        val recipesArray = (root["allLocalRecipes"] as? JsonArray)
+            ?: (root["localRecipes"] as? JsonArray)
+            ?: http.findObjectArray(element, RECIPE_KEYS, mustHave = "pictureControlName")
+            ?: http.findObjectArray(element, RECIPE_KEYS, mustHave = "id")
+            ?: JsonArray(emptyList())
+        /** 原始数组长度就是账号里的方案份数（含解析不出名字的条目）。 */
+        val rawRecipeCount = recipesArray.size
+        val recipes = recipesArray.mapNotNull { el ->
+            val o = el as? JsonObject ?: return@mapNotNull null
+            val id = firstNonBlank(o, "id", "recipeId", "recipe_id")?.takeIf { it.isNotBlank() }
+                ?: return@mapNotNull null
+            OwnedRecipe(
+                id = id,
+                name = firstNonBlank(o, "name", "label", "recipeName", "recipe_name").orEmpty(),
+                pictureControlName = firstNonBlank(o, "pictureControlName", "picture_controll_name").orEmpty(),
+                bookId = firstNonBlank(o, "bookId", "book_id", "publicBookId", "public_book_id")
+                    ?.takeIf { it.isNotBlank() },
+            )
+        }.filter { it.name.isNotBlank() || it.pictureControlName.isNotBlank() }
         return CloudMyRecipes(
             books = books,
-            recipeCount = recipes?.size ?: 0,
+            recipeCount = rawRecipeCount,
             authority = root.int("authority") ?: 0,
+            recipes = recipes,
         )
     }
 
@@ -517,6 +552,7 @@ internal class CloudAccountClient(
         )
         private val ASSIGNABLE_KEYS = listOf("recipe", "recipes", "list", "items", "cameraRecipes")
         private val BOOK_KEYS = listOf("books", "bookList", "book")
+        private val RECIPE_KEYS = listOf("allLocalRecipes", "localRecipes", "recipes", "recipe", "recipeList")
     }
 }
 

@@ -290,6 +290,8 @@ private fun CameraSection(
 
         state.rawSnippet?.let { RawSnippet(it) }
 
+        LibrarySection(state)
+
         Text(
             "说明：云创方案占相机内的 9 个云创槽位（独立存储区），不是机身菜单的 C-1…C-9。方案由相机自己联网拉取；点进相机可编辑槽位排布。",
             style = MaterialTheme.typography.labelSmall,
@@ -298,6 +300,79 @@ private fun CameraSection(
 
         Spacer(Modifier.height(4.dp))
         TextButton(onClick = onLogout, modifier = Modifier.heightIn(min = 48.dp)) { Text("退出云创账号") }
+    }
+}
+
+/**
+ * 收藏夹只读视图：列出账号里每个夹子及其中的方案副本。
+ *
+ * 为什么不做删夹／改名：服务端只有 `PB002 建夹`、`PR001 收藏`、`LR003/LR005 本地方案`，
+ * 没有任何 `DELETE /publicbook`，硬猜端点是拿用户账号试错。要删只能去网页端。
+ */
+@Composable
+private fun LibrarySection(state: CloudAccountState) {
+    val library = state.library
+    if (library == null && !state.loadingLibrary && state.libraryError == null) return
+
+    Spacer(Modifier.height(14.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            "收藏夹",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onBackground,
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            when {
+                state.loadingLibrary && library == null -> "读取中…"
+                library != null -> "共 ${library.recipes.size} 个方案"
+                else -> ""
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+
+    state.libraryError?.let {
+        Text(
+            it,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+    }
+
+    if (library != null) {
+        val known = library.books.map { it.id }.toSet()
+        val groups = library.books.map { book ->
+            book.label.ifBlank { "未命名收藏夹" } to library.recipes.filter { it.bookId == book.id }
+        } + ("" to library.recipes.filter { it.bookId == null || it.bookId !in known })
+        val visible = groups.filter { (label, items) -> label.isNotBlank() || items.isNotEmpty() }
+
+        if (visible.isEmpty()) {
+            Text(
+                "账号里还没有收藏夹。在方案详情页点「收藏」即可复制一份。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        visible.forEach { (label, items) ->
+            Column(Modifier.padding(top = 10.dp)) {
+                Text(
+                    label.ifBlank { "未归类" },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+                Text(
+                    if (items.isEmpty()) {
+                        "空"
+                    } else {
+                        items.joinToString(" · ") { it.name.ifBlank { it.pictureControlName } }
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
 }
 
@@ -375,6 +450,8 @@ private fun SlotSection(
 
         state.saveError?.let { Notice(it) }
         state.rawSnippet?.let { RawSnippet(it) }
+
+        LibrarySection(state)
 
         if (editing) {
             Text(
@@ -602,6 +679,8 @@ private fun SlotPicker(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 state.rawSnippet?.let { RawSnippet(it) }
+
+        LibrarySection(state)
                 TextButton(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) { Text("重新读取") }
             } else {
                 LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp)) {

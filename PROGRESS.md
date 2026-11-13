@@ -517,6 +517,14 @@ else V().debug("newRecipeIdList length 0")   // ← 空数组根本不发请求
 - **封面占位改成呼吸高光**：`CloudBrowseScreen.CoverPlaceholder()` 由静止渐变改为 `rememberInfiniteTransition` 驱动的斜向高光（1.4s 循环）。静止深色块会被误读为「加载失败」，动起来才像「在等图」。
 - 版本 `0.6.15-alpha`（vc 23），99 项 JVM 测试全绿，lint 0 error / 6 warning（既有项）。
 
+## 2026-11-14 · 0.6.16：收藏夹只读视图 + 解析健壮性
+
+- **`IF_FR100_H05` 解析加宽**：`CloudMyRecipes` 新增 `recipes: List<OwnedRecipe>`（id / name / pictureControlName / bookId），`recipeCount` 改用**原始数组长度**（不再因条目缺名字而变 0）。
+- **兜底嗅探不再把方案当收藏夹**：`books` 优先取显式键（`books`/`bookList`/`book`）；只有走递归嗅探时，元素必须带 `label`/`bookName` 或 `recipeCount` 才算书——否则 `{"recipes":[{"id","name"}]}` 会被误判成 2 个收藏夹（新增测试就是这个坑）。
+- **账号页新增「收藏夹」只读区块**：每个夹子一行标题 + 一行方案名（`·` 分隔），无书名的方案归入「未归类」。不做删夹/改名——服务端只有 `PB002 建夹`、`PR001 收藏`、`LR003/LR005 本地方案`，**没有 `DELETE /publicbook`**，删夹只能去网页端（已记入 0.7 边界）。
+- 测试 99 → 102；顺手把 `SecureTokenStore` 的 `SharedPreferences.edit` 换成 KTX 扩展，lint 回到 0 error / 6 warning（全是既有项）。
+- 版本 `0.6.16-alpha`（vc 24），APK SHA-256 `f78b114130bc94572f938310e30e428b73fd898da4246eeba77cb5a54300ce1e`。
+
 ## 开放问题
 
 1. 真实图库规模（120 / 300 / 更大）→ 决定 0.2 分页与批量元数据优先级。

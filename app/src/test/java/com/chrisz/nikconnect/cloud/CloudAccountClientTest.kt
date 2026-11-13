@@ -430,4 +430,45 @@ class CloudAccountClientTest {
             planSlotWrite(before, after).assignments,
         )
     }
+
+    // ---- 收藏夹与方案副本（IF_FR100_H05） ----
+
+    @Test
+    fun `my recipes groups owned recipes by book`() {
+        val raw = """
+            {"authority":0,"books":[{"id":"BK1","label":"NiKConnect","recipeCount":2}],
+             "allLocalRecipes":[
+               {"id":"R1","name":"Vitality Film","pictureControlName":"VitalityFilm_Pmango","bookId":"BK1"},
+               {"id":"R2","name":"Honey Tale","pictureControlName":"HoneyTale_MASAYA","bookId":"BK1"},
+               {"id":"R3","name":"Sky Mist","pictureControlName":"SkyMistFilm_hinano"}]}
+        """.trimIndent()
+        val mine = client().parseMyRecipes(raw)
+        assertEquals(1, mine.books.size)
+        assertEquals("NiKConnect", mine.books.first().label)
+        assertEquals(3, mine.recipes.size)
+        assertEquals(3, mine.recipeCount)
+        assertEquals("BK1", mine.recipes[0].bookId)
+        assertNull(mine.recipes[2].bookId)
+        assertEquals("VitalityFilm_Pmango", mine.recipes[0].pictureControlName)
+    }
+
+    @Test
+    fun `my recipes found under nested recipe key`() {
+        val raw = """
+            {"authority":0,"bookList":[{"id":"BK9","bookName":"书"}],
+             "body":{"recipe":[{"id":"R7","name":"Japanesque","bookId":"BK9"}]}}
+        """.trimIndent()
+        val mine = client().parseMyRecipes(raw)
+        assertEquals(1, mine.recipes.size)
+        assertEquals("Japanesque", mine.recipes.first().name)
+        assertEquals("BK9", mine.recipes.first().bookId)
+    }
+
+    @Test
+    fun `my recipes without books still reports count`() {
+        val raw = """{"authority":0,"recipes":[{"id":"R1","name":"A"},{"id":"R2","name":"B"}]}"""
+        val mine = client().parseMyRecipes(raw)
+        assertTrue(mine.books.isEmpty())
+        assertEquals(2, mine.recipes.size)
+    }
 }

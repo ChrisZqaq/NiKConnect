@@ -1,6 +1,7 @@
 package com.chrisz.nikconnect.cloud
 
 import android.content.Context
+import androidx.core.content.edit
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -31,7 +32,7 @@ internal class SecureTokenStore(context: Context) {
             cipher.init(Cipher.ENCRYPT_MODE, secretKey())
             val encrypted = cipher.doFinal(token.toByteArray(Charsets.UTF_8))
             val payload = cipher.iv + encrypted
-            prefs.edit().putString(KEY_TOKEN, Base64.encodeToString(payload, Base64.NO_WRAP)).apply()
+            prefs.edit { putString(KEY_TOKEN, Base64.encodeToString(payload, Base64.NO_WRAP)) }
         }
     }
 
@@ -54,7 +55,7 @@ internal class SecureTokenStore(context: Context) {
     }
 
     fun clear() {
-        prefs.edit().remove(KEY_TOKEN).apply()
+        prefs.edit { remove(KEY_TOKEN) }
     }
 
     private fun secretKey(): SecretKey {

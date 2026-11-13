@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.chrisz.nikconnect.cloud.CloudAccountClient
 import com.chrisz.nikconnect.cloud.CloudCamera
 import com.chrisz.nikconnect.cloud.CloudException
+import com.chrisz.nikconnect.cloud.CloudMyRecipes
 import com.chrisz.nikconnect.cloud.CloudRecipe
 import com.chrisz.nikconnect.cloud.CloudSlot
 import com.chrisz.nikconnect.cloud.CloudSlotAssignment
@@ -34,6 +35,10 @@ internal data class CloudAccountState(
     val loadingSlots: Boolean = false,
     val slotsError: String? = null,
     val assignableCount: Int? = null,
+    /** 账号里的收藏夹与方案副本（`IF_FR100_H05`）。 */
+    val library: CloudMyRecipes? = null,
+    val loadingLibrary: Boolean = false,
+    val libraryError: String? = null,
     /** 编辑态：非 null 表示正在改排布，值为界面上看到的顺序（与服务端数据分离，取消即丢弃）。 */
     val draft: List<CloudSlot>? = null,
     val saving: Boolean = false,
@@ -148,6 +153,7 @@ internal class CloudAccountViewModel(
                         )
                     }
                     loadAssignableCount(client)
+                    loadLibrary(client)
                     return@launch
                 } catch (e: CloudException) {
                     lastError = e
@@ -207,6 +213,27 @@ internal class CloudAccountViewModel(
         slotRequestId++
         _state.value = CloudAccountState(guid = guid ?: _state.value.guid)
         refreshCameras()
+    }
+
+    // ---- 收藏夹与方案副本（IF_FR100_H05） ----
+
+    /**
+     * 拉账号里的收藏夹。只为"看清楚我有哪些方案、分别是几份"，不做写操作：
+     * 服务端没有 `DELETE /publicbook`，删夹只能去网页端，所以这里只读。
+     */
+    private fun loadLibrary(client: CloudAccountClient) {
+        if (_state.value.loadingLibrary) return
+        _state.update { it.copy(loadingLibrary = true, libraryError = null) }
+        viewModelScope.launch {
+            try {
+                val library = client.fetchMyRecipes()
+                _state.update { it.copy(library = library, loadingLibrary = false) }
+            } catch (e: CloudException) {
+                _state.update {
+                    it.copy(loadingLibrary = false, libraryError = describe(e, "IF_FR100_H05"))
+                }
+            }
+        }
     }
 
     // ---- 可分配方案池（IF_FR100_H13） ----
