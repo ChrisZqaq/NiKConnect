@@ -172,12 +172,12 @@ internal class CloudAccountViewModel(
         viewModelScope.launch {
             val client = CloudAccountClient(accessToken = accessToken, guid = guid)
             try {
-                val slots = client.cameraSlots(camera.id)
+                val slots = fetchSlots(client, camera.id)
                 // 迟到结果保护：期间切了相机/返回列表/换了账号，就丢弃这次响应
                 if (requestId != slotRequestId || _state.value.selected?.id != camera.id) return@launch
                 _state.update {
                     it.copy(
-                        slots = padSlots(slots),
+                        slots = slots,
                         loadingSlots = false,
                         slotsError = if (slots.isEmpty()) "相机没有返回槽位数据。" else null,
                     )
@@ -221,9 +221,13 @@ internal class CloudAccountViewModel(
         viewModelScope.launch {
             val client = CloudAccountClient(accessToken = accessToken, guid = guid)
             try {
-                val recipes = client.assignableRecipes()
+                val assignable = client.fetchAssignable()
                 _state.update {
-                    it.copy(assignable = recipes, loadingAssignable = false, assignableCount = recipes.size)
+                    it.copy(
+                        assignable = assignable.recipes,
+                        loadingAssignable = false,
+                        assignableCount = assignable.recipes.size,
+                    )
                 }
             } catch (e: CloudException) {
                 _state.update {
@@ -302,11 +306,11 @@ internal class CloudAccountViewModel(
             val client = CloudAccountClient(accessToken = accessToken, guid = guid)
             try {
                 client.deleteSlot(camera.id, recipeId)
-                val refreshed = client.cameraSlots(camera.id)
+                val refreshed = fetchSlots(client, camera.id)
                 if (requestId != slotRequestId || _state.value.selected?.id != camera.id) return@launch
                 _state.update {
                     it.copy(
-                        slots = padSlots(refreshed),
+                        slots = refreshed,
                         draft = null,
                         deleting = null,
                         savedNotice = "已删除该槽位方案",
@@ -335,14 +339,13 @@ internal class CloudAccountViewModel(
         if (_state.value.saving) return
         val guid = workingGuid ?: _state.value.guid ?: return
 
-        val before = _state.value.slots.sortedBy { it.index }
-            .mapNotNull { it.recipeId?.takeIf { id -> id.isNotBlank() } }
-        val after = draft.mapNotNull { it.recipeId?.takeIf { id -> id.isNotBlank() } }
-        if (before == after) {
+        val before = padSlots(_state.value.slots)
+        val after = padSlots(draft)
+        val plan = planSlotWrite(before, after)
+        if (plan.noop) {
             _state.update { it.copy(draft = null, savedNotice = "排布没有变化") }
             return
         }
-        val plan = planSlotWrite(before, after)
         val callId = plan.callId
 
         _state.update { it.copy(saving = true, saveError = null) }
@@ -356,10 +359,10 @@ internal class CloudAccountViewModel(
                 } else {
                     client.replaceSlots(camera.id, assignments)
                 }
-                val refreshed = client.cameraSlots(camera.id)
+                val refreshed = fetchSlots(client, camera.id)
                 _state.update {
                     it.copy(
-                        slots = padSlots(refreshed),
+                        slots = refreshed,
                         draft = null,
                         saving = false,
                         savedNotice = if (plan.assignments == null) {
@@ -389,6 +392,30 @@ internal class CloudAccountViewModel(
         _state.update { it.copy(savedNotice = null) }
     }
 
+    /**
+     * 重新拉一次「真实排布 + 方案详情」，顺便刷新可分配池。
+     *
+     * 槽位号必须以 H13 的 `recipeIds` 为准：C002 的 `localRecipes` 只有已占用项、不带槽位号，
+     * 用它按数组顺序编号会把空洞抹平（真机：删掉第 1 位后 App 显示 2、3 前移，相机上第 1 位空着），
+     * 之后 PATCH 的 `slotNo` 全部错位，服务端 400。
+     */
+    private suspend fun fetchSlots(
+        client: CloudAccountClient,
+        cameraId: String,
+    ): List<CloudSlot> {
+        val assignable = runCatching { client.fetchAssignable() }.getOrNull()
+        if (assignable != null) {
+            _state.update {
+                it.copy(
+                    assignable = assignable.recipes,
+                    assignableCount = assignable.recipes.size,
+                    assignableError = null,
+                )
+            }
+        }
+        return client.cameraSlots(cameraId, assignable?.layouts?.get(cameraId))
+    }
+
     fun backToList() {
         slotRequestId++
         _state.update { it.copy(selected = null, slots = emptyList(), slotsError = null, loadingSlots = false) }
@@ -396,7 +423,7 @@ internal class CloudAccountViewModel(
 
     private fun loadAssignableCount(client: CloudAccountClient) {
         viewModelScope.launch {
-            runCatching { client.assignableRecipes().size }
+            runCatching { client.fetchAssignable().recipes.size }
                 .onSuccess { count -> _state.update { it.copy(assignableCount = count) } }
         }
     }

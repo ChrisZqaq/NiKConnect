@@ -5,8 +5,10 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
 
 /** 已注册到云创账号的相机。 */
@@ -47,12 +49,57 @@ internal fun padSlots(slots: List<CloudSlot>, count: Int = 9): List<CloudSlot> {
 }
 
 /**
+ * 把「真实排布」和「方案详情」合成槽位列表。
+ *
+ * 真机教训（2026-11-14，用户报「删掉第 1 个后 App 里第 2、3 个前移，但相机上第 1 位空着」）：
+ * `IF_IR_R_C002` 的 `localRecipes` **只含已占用的方案，不带槽位号**，照数组顺序编号会把空洞抹掉；
+ * 真实排布是 `IF_FR100_H13` 里 `camera[].recipeIds` —— 定长 9 的数组，空位是 `null`。
+ *
+ * @param recipeIds 定长排布（含 null 表示空位）；为 null 时退回「按 C002 数组顺序编号」的老行为
+ * @param local C002 的 `localRecipes` 解析结果，只用来取方案名/代号
+ */
+internal fun mergeSlots(recipeIds: List<String?>?, local: List<CloudSlot>): List<CloudSlot> {
+    val detail = local.mapNotNull { slot -> slot.recipeId?.let { it to slot } }.toMap()
+    if (recipeIds.isNullOrEmpty()) {
+        val dense = local.sortedBy { it.index }
+        return padSlots(
+            if (dense.isEmpty()) emptyList()
+            else dense.mapIndexed { i, slot -> slot.copy(index = i + 1) },
+        )
+    }
+    val slots = recipeIds.mapIndexed { i, id ->
+        if (id.isNullOrBlank()) {
+            CloudSlot(index = i + 1)
+        } else {
+            val d = detail[id]
+            CloudSlot(
+                index = i + 1,
+                recipeId = id,
+                name = d?.name.orEmpty(),
+                pictureControlName = d?.pictureControlName.orEmpty(),
+                modifiedAt = d?.modifiedAt.orEmpty(),
+            )
+        }
+    }
+    return padSlots(slots)
+}
+
+/**
  * 一次槽位排布提交项。Web 端 PATCH 的 body 就是 `{recipes:[{slotNo,recipeId}]}`，
  * 且**只提交已占用的槽位**（空位靠"不在数组里"表示，不是 `null`）。
  */
 internal data class CloudSlotAssignment(
     val slotNo: Int,
     val recipeId: String,
+)
+
+/**
+ * `IF_FR100_H13` 的双重用途：可分配池（`recipe[]`）+ 每台相机的真实槽位排布（`camera[].recipeIds`）。
+ * 两个字段在同一次响应里，所以一次请求就够，不必再多跑一趟。
+ */
+internal data class CloudAssignable(
+    val recipes: List<CloudRecipe>,
+    val layouts: Map<String, List<String?>> = emptyMap(),
 )
 
 /** 账号中心（Keycloak userinfo）返回的身份信息：账号 ID 的唯一权威来源。 */
@@ -97,10 +144,15 @@ internal class CloudAccountClient(
         parseCameras(raw)
     }
 
-    suspend fun cameraSlots(cameraId: String): List<CloudSlot> = withContext(Dispatchers.IO) {
-        val raw = http.get("$IR_HOST/camera/$guid/$cameraId", bearer, "IF_IR_R_C002")
-        parseSlots(raw)
-    }
+    /**
+     * 读槽位。`recipeIds` 来自 H13 的 `camera[].recipeIds`（真实排布，空位为 null），
+     * C002 只提供方案详情，两者合成才是「第几位放了什么」。
+     */
+    suspend fun cameraSlots(cameraId: String, recipeIds: List<String?>? = null): List<CloudSlot> =
+        withContext(Dispatchers.IO) {
+            val raw = http.get("$IR_HOST/camera/$guid/$cameraId", bearer, "IF_IR_R_C002")
+            mergeSlots(recipeIds, parseSlots(raw))
+        }
 
     /**
      * 覆盖相机上的 9 个云创槽位排布（`IF_IR_R_C004`）。
@@ -138,15 +190,18 @@ internal class CloudAccountClient(
         )
     }
 
-    suspend fun assignableRecipes(): List<CloudRecipe> = withContext(Dispatchers.IO) {
+    /** 一次拿全：可分配池 + 每台相机的真实槽位排布（同一份 H13 响应）。 */
+    suspend fun fetchAssignable(): CloudAssignable = withContext(Dispatchers.IO) {
         val raw = http.post(
             "$CWP_HOST/bff/recipe/camera",
             """{"country":"$country"}""",
             mapOf("access_token" to accessToken),
             "IF_FR100_H13",
         )
-        parseAssignable(raw)
+        CloudAssignable(recipes = parseAssignable(raw), layouts = parseLayouts(raw))
     }
+
+    suspend fun assignableRecipes(): List<CloudRecipe> = fetchAssignable().recipes
 
     // ---- 解析（纯函数，供 JVM 测试） ----
 
@@ -212,6 +267,28 @@ internal class CloudAccountClient(
                 likes = (o["like"] as? JsonObject)?.int("num") ?: 0,
             )
         }
+    }
+
+    /**
+     * 从 H13 的 `camera[]` 读每台相机的 `recipeIds`（真实槽位排布）。
+     *
+     * Web 端就是这么用它的：`p.find(c => c.deviceId === id).recipeIds.map(...)`，
+     * `recipeIds[i]` 为 null 表示第 i+1 位是空的 —— 这是唯一能区分「第 1 位空着」和
+     * 「第 1 位放了第 2 个方案」的信息源。
+     */
+    fun parseLayouts(raw: String): Map<String, List<String?>> {
+        val element = http.parseElement(raw, "IF_FR100_H13")
+        val cameras = http.findObjectArray(element, CAMERA_KEYS, mustHave = "deviceId")
+            ?: return emptyMap()
+        return cameras.mapNotNull { el ->
+            val o = el as? JsonObject ?: return@mapNotNull null
+            val id = firstNonBlank(o, "deviceId", "device_id", "id", "cameraId") ?: return@mapNotNull null
+            val ids = o["recipeIds"] as? JsonArray ?: return@mapNotNull null
+            id to ids.map { entry ->
+                val text = (entry as? JsonPrimitive)?.contentOrNull
+                text?.takeIf { it.isNotBlank() && it != "null" && it != "0" }
+            }
+        }.toMap()
     }
 
     /** PATCH body 构造（纯函数，便于单测）：只发已占用槽位，按 slotNo 升序。 */
@@ -284,7 +361,7 @@ internal class CloudAccountClient(
     companion object {
         private val CAMERA_KEYS = listOf("cameraList", "cameras", "camera", "list", "items")
         private val SLOT_KEYS = listOf(
-            "recipes", "recipe", "cameraRecipes", "slots", "cameraSlots",
+            "localRecipes", "recipes", "recipe", "cameraRecipes", "slots", "cameraSlots",
             "pictureControls", "pictureControl", "controlList", "list", "items",
         )
         private val ASSIGNABLE_KEYS = listOf("recipe", "recipes", "list", "items", "cameraRecipes")
@@ -310,13 +387,24 @@ internal data class CloudSlotWritePlan(
 }
 
 /**
- * @param before 服务端当前的已占用方案（按槽位顺序）
- * @param after  编辑后界面上的已占用方案（按槽位顺序）
+ * `slotNo` 一律取自 [CloudSlot.index]，**不能用「第几个已占用方案」**：真机上删掉第 1 位后
+ * 剩下的是第 2、3 位，按顺序重编号会把 B 发成 slotNo 1，服务端直接 400。
+ *
+ * @param before 服务端当前的槽位（含空位，`index` 即槽位号）
+ * @param after  编辑后界面上的槽位（含空位）
  */
-internal fun planSlotWrite(before: List<String>, after: List<String>): CloudSlotWritePlan {
-    if (before == after) return CloudSlotWritePlan(noop = true)
-    if (after.isEmpty()) return CloudSlotWritePlan(deletes = before.distinct())
+internal fun planSlotWrite(before: List<CloudSlot>, after: List<CloudSlot>): CloudSlotWritePlan {
+    val beforeKey = before.assignedSlots()
+    val afterKey = after.assignedSlots()
+    if (beforeKey == afterKey) return CloudSlotWritePlan(noop = true)
+    if (afterKey.isEmpty()) return CloudSlotWritePlan(deletes = beforeKey.map { it.second }.distinct())
     return CloudSlotWritePlan(
-        assignments = after.mapIndexed { position, recipeId -> CloudSlotAssignment(position + 1, recipeId) },
+        assignments = afterKey.map { (slotNo, recipeId) -> CloudSlotAssignment(slotNo, recipeId) },
     )
 }
+
+/** 已占用槽位 → `(槽位号, 方案 ID)`，按槽位号升序。 */
+private fun List<CloudSlot>.assignedSlots(): List<Pair<Int, String>> =
+    filter { !it.recipeId.isNullOrBlank() }
+        .sortedBy { it.index }
+        .map { it.index to it.recipeId.orEmpty() }

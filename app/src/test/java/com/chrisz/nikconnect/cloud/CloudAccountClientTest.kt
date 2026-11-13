@@ -16,6 +16,10 @@ class CloudAccountClientTest {
 
     private fun client() = CloudAccountClient(accessToken = "test-token", guid = "01TESTGUID0000000000000000")
 
+    /** 把方案 ID 列表铺成"从第 1 位连续占用"的槽位，等价于旧测试里的 List<String> 入参。 */
+    private fun slotsOf(vararg ids: String) =
+        ids.mapIndexed { i, id -> CloudSlot(index = i + 1, recipeId = id, name = id, pictureControlName = "pc") }
+
     // ---- 相机列表 ----
 
     @Test
@@ -209,7 +213,7 @@ class CloudAccountClientTest {
 
     @Test
     fun `unchanged layout plans nothing`() {
-        val plan = planSlotWrite(listOf("A", "B"), listOf("A", "B"))
+        val plan = planSlotWrite(slotsOf("A", "B"), slotsOf("A", "B"))
         assertTrue(plan.noop)
         assertNull(plan.assignments)
         assertTrue(plan.deletes.isEmpty())
@@ -217,7 +221,7 @@ class CloudAccountClientTest {
 
     @Test
     fun `reorder plans a full patch with one-based slot numbers`() {
-        val plan = planSlotWrite(listOf("A", "B"), listOf("B", "A"))
+        val plan = planSlotWrite(slotsOf("A", "B"), slotsOf("B", "A"))
         assertFalse(plan.noop)
         assertEquals(
             listOf(
@@ -232,7 +236,7 @@ class CloudAccountClientTest {
     /** 真机踩过：全清空时发 `{"recipes":[]}` 被服务端回 422，Web 端根本不会发这个请求。 */
     @Test
     fun `clearing every slot plans deletes instead of an empty patch`() {
-        val plan = planSlotWrite(listOf("A"), emptyList())
+        val plan = planSlotWrite(slotsOf("A"), emptyList())
         assertNull(plan.assignments)
         assertEquals(listOf("A"), plan.deletes)
         assertEquals("IF_IR_R_C005", plan.callId)
@@ -240,7 +244,7 @@ class CloudAccountClientTest {
 
     @Test
     fun `adding into an empty slot plans a patch`() {
-        val plan = planSlotWrite(listOf("A"), listOf("A", "C"))
+        val plan = planSlotWrite(slotsOf("A"), slotsOf("A", "C"))
         assertEquals(
             listOf(
                 CloudSlotAssignment(slotNo = 1, recipeId = "A"),
@@ -273,5 +277,69 @@ class CloudAccountClientTest {
         assertEquals((1..9).toList(), slots.map { it.index })
         assertTrue(slots[4].occupied)
         assertFalse(slots[3].occupied)
+    }
+
+    // ---- 真实排布（真机：C002 不含槽位号，recipeIds 才带空洞） ----
+
+    @Test
+    fun `recipeIds keeps the hole left by a deletion`() {
+        // 真机现象：删掉第 1 位后 C002 只剩 B、C 两条，按数组顺序编号就会显示成 1:B、2:C，
+        // 而相机上实际是 2:B、3:C，第 1 位空着。
+        val local = listOf(
+            CloudSlot(index = 1, recipeId = "B", name = "Vitality Film", pictureControlName = "VitalityFilm_Pmango"),
+            CloudSlot(index = 2, recipeId = "C", name = "Teal&Orange", pictureControlName = "ClrMode_TealOr_01a"),
+        )
+        val slots = mergeSlots(listOf(null, "B", "C", null, null, null, null, null, null), local)
+        assertEquals(9, slots.size)
+        assertFalse(slots[0].occupied)
+        assertEquals("B", slots[1].recipeId)
+        assertEquals("Vitality Film", slots[1].name)
+        assertEquals("C", slots[2].recipeId)
+        assertEquals(3, slots[2].index)
+    }
+
+    @Test
+    fun `recipeIds wins over array order`() {
+        val local = listOf(CloudSlot(index = 1, recipeId = "A", name = "A", pictureControlName = "pc"))
+        val slots = mergeSlots(listOf(null, null, "A"), local)
+        assertEquals(9, slots.size)
+        assertEquals("A", slots[2].recipeId)
+        assertFalse(slots[0].occupied)
+    }
+
+    @Test
+    fun `missing layout falls back to array order`() {
+        val local = listOf(
+            CloudSlot(index = 1, recipeId = "A", name = "A", pictureControlName = "pc"),
+            CloudSlot(index = 2, recipeId = "B", name = "B", pictureControlName = "pc"),
+        )
+        val slots = mergeSlots(null, local)
+        assertEquals(9, slots.size)
+        assertEquals("A", slots[0].recipeId)
+        assertEquals("B", slots[1].recipeId)
+    }
+
+    @Test
+    fun `all slots deleted yields nine empties`() {
+        val slots = mergeSlots(List(9) { null }, emptyList())
+        assertEquals(9, slots.size)
+        assertTrue(slots.none { it.occupied })
+    }
+
+    @Test
+    fun `parseLayouts reads recipeIds per camera`() {
+        val raw = """
+            {"statusCode":200,"body":{
+              "camera":[{"deviceId":"01JTC8","name":"Zf","recipeIds":[null,"01JTC96K","01JVC"]}],
+              "recipe":[{"id":"01JTC96K","name":"Sky Mist"}]
+            }}
+        """.trimIndent()
+        val layouts = client().parseLayouts(raw)
+        assertEquals(listOf(null, "01JTC96K", "01JVC"), layouts["01JTC8"])
+    }
+
+    @Test
+    fun `parseLayouts tolerates a response without camera layout`() {
+        assertTrue(client().parseLayouts("""{"statusCode":200,"body":{"recipe":[]}}""").isEmpty())
     }
 }

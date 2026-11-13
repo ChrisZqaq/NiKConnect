@@ -1,14 +1,14 @@
 # NiKConnect 开发进展与问题记录
 
-最后更新：2026-11-12
+最后更新：2026-11-14
 
 > 本文件是唯一的活动进展记录。每完成一个开发/测试批次就更新；问题按"发现→分析→处置"记录。历史归档见 [docs/references/ZF_Relay_真机验证记录.md](docs/references/ZF_Relay_真机验证记录.md)。
 
 ## 当前状态
 
-- **版本**：0.6.8-alpha（0.6 批次 2：换位已真机通过；删除改为行尾垃圾桶 → 立即 `DELETE`（C005），槽位固定渲染 9 格让空位可加；JVM 80 项测试通过）
+- **版本**：0.6.9-alpha（0.6 批次 2：槽位号改以 H13 `camera[].recipeIds` 为准，删除后空洞不再被抹平；`PATCH` 的 `slotNo` 取真实槽位；JVM 86 项测试通过）
 - **真机基线**：一加 Ace 5 Pro + Nikon Zf
-- **未关闭验证**：0.4 RAW 哈希/分块对照；0.5 遗留三项（在线刷新频控、详情参数与官网逐项对照、蜂窝网络封面流量）；0.6 只读部分的细节项（槽位号与网页端逐位对照、已占用/空位区分、可分配方案数、token 长时失效）见 [docs/acceptance/0.6.md](docs/acceptance/0.6.md)；0.6 批次 2（拖拽排布、收藏到书）未开工
+- **未关闭验证**：0.6.9 删除后位置保持、重新加回不再 400（用户真机待验）；0.4 RAW 哈希/分块对照；0.5 遗留三项（在线刷新频控、详情参数与官网逐项对照、蜂窝网络封面流量）；0.6 只读部分的细节项（槽位号与网页端逐位对照、已占用/空位区分、可分配方案数、token 长时失效）见 [docs/acceptance/0.6.md](docs/acceptance/0.6.md)；0.6 批次 2（拖拽排布、收藏到书）未开工
 
 ## 版本历史
 
@@ -426,6 +426,23 @@ else V().debug("newRecipeIdList length 0")   // ← 空数组根本不发请求
 - `ui/CloudAccountViewModel.kt`：新增 `deleteSlot(recipeId)`（立即 C005 + 重新 GET + 代次保护）；`openCamera`/`saveLayout`/`deleteSlot` 的响应统一过 `padSlots`；删除旧的 `clearSlot()`。
 - `ui/CloudAccountScreen.kt`：编辑态——拖动把手 + 空位「＋」；非编辑态——占用行尾垃圾桶（删除中显示进度）、确认弹窗；`pendingDelete` 提到屏幕层避免与槽位区状态耦合。
 - 测试 +2（补齐 9 格、有空洞时不挪位），JVM 80 项全绿。
+
+## 2026-11-14 · 0.6.9：槽位号以真实排布为准（`recipeIds`）
+
+真机反馈（0.6.8，用户 m05499）：删掉第 1 位后，App 里第 2、3 个自动前移；相机同步后仍是 2、3，第 1 位空着；把删掉的方案加回第 3 位则 `IF_IR_R_C004 HTTP 400`（响应体为空）。
+
+根因是**槽位号从数组下标推出来的**：
+
+- `IF_IR_R_C002` 的 `localRecipes` 只含**已占用**项、不带槽位号。删掉第 1 位后它返回 `[B, C]`，我们按顺序编号成 1:B、2:C，而相机上是 2:B、3:C。
+- 真实排布在 `IF_FR100_H13` 的 `camera[].recipeIds`：定长 9 的数组，空位是 `null`。Web 端就是 `recipeIds.map(id => localRecipes.find(...))` 拼出来的（见 `camera-129ad77c551770c0.js` 的 `N(...)`）。
+- 于是从"错误编号"再 PATCH，`slotNo` 1/2/3 与服务端 2/3 冲突 → 400。
+
+改法：
+
+- `cloud/CloudAccountClient.kt`：新增 `CloudAssignable(recipes, layouts)`、`parseLayouts(raw)`（读 `camera[].recipeIds`）、`fetchAssignable()`（一次 H13 同时拿池与排布）、顶层纯函数 `mergeSlots(recipeIds, local)`（按 `recipeIds` 定位、空位补空、`localRecipes` 只提供名字/代号）；`cameraSlots(cameraId, recipeIds)` 接排布参数；`SLOT_KEYS` 前置 `localRecipes`。
+- `cloud/CloudAccountClient.kt`：`planSlotWrite(before, after)` 改吃 `List<CloudSlot>`，`slotNo` 取 `CloudSlot.index`，不再按"第几个已占用方案"重编号。
+- `ui/CloudAccountViewModel.kt`：新增私有 `fetchSlots(client, cameraId)`——先 H13 拿 `recipeIds` 与可分配池（顺带刷新池，避免删除后仍能选到陈旧项），再 C002 取详情合成；`openCamera`/`deleteSlot`/`saveLayout` 全部走它。
+- 测试 +6（空洞保留、`recipeIds` 优先于数组序、无排布时退回数组序、全删九格空、`parseLayouts` 正例/缺省），JVM 86 项全绿；lint 0 error / 6 warning。
 
 ## 开放问题
 
