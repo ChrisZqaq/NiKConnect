@@ -47,7 +47,7 @@ import com.chrisz.nikconnect.cloud.CloudBook
  * 详情页的「收藏」入口。
  *
  * 为什么需要它：官方目录里的方案只是"看得见"，账号里没有它就不能分配给相机。
- * `IF_IR_R_PR001` 会把它复制一份进自己的书，之后才会出现在
+ * `IF_IR_R_LR002` 会把它复制一份进「我的方案库」，之后才会出现在
  * `IF_FR100_H13` 的可分配池里（也就是账号页「＋」能挑到的列表）。
  */
 @Composable
@@ -57,6 +57,7 @@ internal fun CloudFavoriteBar(
     token: String?,
     guid: String?,
     onNeedLogin: () -> Unit,
+    createdBy: String = "Nikon",
 ) {
     if (token.isNullOrBlank()) {
         OutlinedButton(
@@ -106,6 +107,7 @@ internal fun CloudFavoriteBar(
             state = state,
             onPick = { book -> model.favoriteInto(recipeId, book) },
             onCreate = { model.createBookAndFavorite(recipeId) },
+            onSaveToLibrary = { model.saveToLibrary(recipeId, recipeName, createdBy) },
             onRetry = model::loadBooks,
             onDismiss = {
                 model.clearError()
@@ -123,6 +125,7 @@ private fun FavoriteSheet(
     state: CloudFavoriteState,
     onPick: (CloudBook) -> Unit,
     onCreate: () -> Unit,
+    onSaveToLibrary: () -> Unit,
     onRetry: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -133,7 +136,7 @@ private fun FavoriteSheet(
         ) {
             Text("收藏", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Text(
-                "$recipeName · 复制一份到你的收藏夹，之后才能排进相机槽位",
+                "$recipeName · 复制一份到「我的方案库」，之后就能排进相机槽位",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 8.dp),
@@ -183,6 +186,31 @@ private fun FavoriteSheet(
                 }
 
                 else -> {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 56.dp)
+                            .clickable(enabled = !state.working, onClick = onSaveToLibrary)
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.BookmarkAdded,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                        Column {
+                            Text("保存到我的方案库", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                "推荐：不依赖收藏夹，之后可直接排进相机槽位",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline)
                     if (state.books.isEmpty()) {
                         Text(
                             "还没有收藏夹。新建一个即可收藏。",

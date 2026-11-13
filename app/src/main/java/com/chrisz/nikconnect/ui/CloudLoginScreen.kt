@@ -158,6 +158,8 @@ fun CloudLoginScreen(
     var webView by remember { mutableStateOf<WebView?>(null) }
     var capturedToken by remember { mutableStateOf("") }
     var capturedGuid by remember { mutableStateOf("") }
+    // 一次进程只探一次，避免每次登录都往外发请求
+    var probeDone by remember { mutableStateOf(false) }
     var completed by remember { mutableStateOf(false) }
     var slow by remember { mutableStateOf(false) }
     var oidcTried by remember { mutableStateOf(false) }
@@ -166,9 +168,39 @@ fun CloudLoginScreen(
     var interactiveTried by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
+    /**
+     * 调试用：在**页面上下文**里用同一份 token 打一次 PB002（body 故意非法），
+     * 用来分辨 403 是「账号权限」还是「我们的请求形状」。
+     * 只在 debuggable 构建（CloudDebug.enabled）里跑，且每次进程只跑一次。
+     */
+    fun probeCreateBookInPage(token: String?, guid: String?) {
+        val view = webView ?: return
+        if (probeDone) return
+        probeDone = true
+        val js = """
+            (function(){
+              var kc = window.keycloak || window.__keycloak || window.kc || null;
+              var tk = (kc && kc.token) || '$token';
+              var gd = (kc && kc.tokenParsed && kc.tokenParsed.guid) || '$guid';
+              if(!tk || !gd){ console.log('PROBE skip no-credentials'); return; }
+              function hit(body, tag){
+                return fetch('https://api.user.ir.imagingcloud.nikon.com.cn/publicbook/'+gd,{
+                  method:'POST',
+                  headers:{'Authorization':'Bearer '+tk},
+                  body:JSON.stringify(body)
+                }).then(function(r){return r.text().then(function(b){console.log('PROBE '+tag+' '+r.status+' '+(b||'').slice(0,80));});})
+                 .catch(function(e){console.log('PROBE '+tag+' err '+e);});
+              }
+              return hit({name:''}, 'empty-name');
+            })();
+        """.trimIndent()
+        runCatching { view.evaluateJavascript(js, null) }
+    }
+
     fun finishWith(token: String?, guid: String?, refresh: String?) {
         if (completed) return
         completed = true
+        if (com.chrisz.nikconnect.cloud.CloudDebug.enabled) probeCreateBookInPage(token, guid ?: capturedGuid)
         onDone(CloudAuthState(token = token, guid = guid?.takeIf { it.isNotBlank() }, refreshToken = refresh))
     }
 
@@ -209,11 +241,17 @@ fun CloudLoginScreen(
                 http.post(
                     com.chrisz.nikconnect.cloud.AUTH_HOST + "/protocol/openid-connect/token",
                     CloudOidc.exchangeBody(cb.code, CloudOidc.REDIRECT_URI, verifier),
-                    mapOf("Content-Type" to "application/x-www-form-urlencoded"),
+                    emptyMap(),
                     "OIDC_CODE",
+                    contentType = "application/x-www-form-urlencoded",
                 )
             }.getOrElse { e ->
-                runCatching { android.util.Log.d("NikConnect", "oidc exchange failed: ${e.message}") }
+                runCatching {
+                    android.util.Log.d(
+                        "NikConnect",
+                        "oidc exchange failed: ${e::class.simpleName} ${e.message}",
+                    )
+                }
                 oidcTried = false
                 webView?.post { webView?.loadUrl(CLOUD_INDEX_URL) }
                 return@launch

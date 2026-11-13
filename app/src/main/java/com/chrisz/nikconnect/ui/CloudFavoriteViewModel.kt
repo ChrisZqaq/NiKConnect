@@ -144,6 +144,36 @@ internal class CloudFavoriteViewModel(
         }
     }
 
+    /**
+     * 收藏 = 复制进「我的方案库」（`IF_IR_R_LR002`），不碰收藏夹。
+     *
+     * 真机实测：`POST /publicbook/{guid}`（建收藏夹）对我们这种普通账号一直 403，且网页端只在
+     * “发布方案”流程里调它；而方案库（H05 的 `localRecipes`）是「我的方案」本身，复制进去之后
+     * 就能用 `IF_IR_R_C003` 加进相机池。所以收藏按钮走这条路。
+     */
+    fun saveToLibrary(recipeId: String, recipeName: String, createdBy: String) {
+        if (recipeId.isBlank() || _state.value.working) return
+        _state.update { it.copy(working = true, error = null, detail = null, phase = "正在保存到我的方案库…") }
+        viewModelScope.launch {
+            try {
+                ensureGuid()
+                api().saveToLibrary(
+                    name = recipeName.ifBlank { "NiKConnect" },
+                    createdBy = createdBy.ifBlank { "Nikon" },
+                    resourceId = recipeId,
+                )
+                _state.update {
+                    it.copy(working = false, phase = null, notice = "已保存到我的方案库，可在相机槽位里选它")
+                }
+                refreshBooksQuietly()
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(working = false, phase = null, error = describe(e, "IF_IR_R_LR002"), detail = detailOf(e))
+                }
+            }
+        }
+    }
+
     fun clearError() {
         _state.update { it.copy(error = null, detail = null) }
     }

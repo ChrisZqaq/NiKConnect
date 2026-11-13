@@ -131,6 +131,9 @@ internal class CloudHttp(
         contentType: String = "text/plain;charset=UTF-8",
         omitOrigin: Boolean = false,
     ): String {
+        // 一律切到 IO：登录页在 Main 上直接调 post()，否则 HttpURLConnection 会抛
+        // NetworkOnMainThreadException，而它的 message 是 null，日志里只剩「网络失败：null」。
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         // gate 覆盖「等间隔 + 发请求 + 读响应」全过程：慢请求不会与后续请求重叠（进程内单飞）。
         gate.withLock {
             val wait = minIntervalMillis - (nowMillis() - lastRequestAt)
@@ -160,7 +163,7 @@ internal class CloudHttp(
                 CloudDebug.record("$callId-$code", "$method $url\n${body.orEmpty()}", text)
                 if (code == 401 || code == 403) throw CloudException("$callId HTTP $code", httpStatus = code)
                 if (code !in 200..299) throw CloudException("$callId HTTP $code：${text.take(160)}", httpStatus = code)
-                return text
+                text
             } catch (e: CloudException) {
                 throw e
             } catch (e: Exception) {
@@ -169,6 +172,7 @@ internal class CloudHttp(
             } finally {
                 conn.disconnect()
             }
+        }
         }
     }
 

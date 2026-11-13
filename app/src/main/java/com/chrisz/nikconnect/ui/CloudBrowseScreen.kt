@@ -564,6 +564,7 @@ private fun CloudRecipeDetailScreen(
                     token = favoriteToken,
                     guid = favoriteGuid,
                     onNeedLogin = onNeedLogin,
+                    createdBy = detail.author,
                 )
 
                 if (detail.description.isNotBlank()) {

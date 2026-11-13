@@ -10,6 +10,21 @@
 - **真机基线**：一加 Ace 5 Pro + Nikon Zf
 - **未关闭验证**：0.6.9 删除后位置保持、重新加回不再 400；0.6.10 收藏官方方案后能否在账号页「＋」里挑到并排进槽位（均待用户真机验证）；0.4 RAW 哈希/分块对照；0.5 遗留三项（在线刷新频控、详情参数与官网逐项对照、蜂窝网络封面流量）；0.6 只读部分的细节项（槽位号与网页端逐位对照、已占用/空位区分、可分配方案数、token 长时失效）见 [docs/acceptance/0.6.md](docs/acceptance/0.6.md)；0.6 批次 2（拖拽排布、收藏到书）未开工
 
+## 2026-11-14 · 0.7.2：收藏改走「我的方案库」，建收藏夹 403 定性
+
+- **`IF_IR_R_PB002` 403 定性**：把网页端全部 42 个 chunk 拉全后枚举接口，PB002（`POST /publicbook/{guid}` `{name}`）只出现在
+  `idx.js` 的 `e9` 里，而 `e9` 的下一步是 `r.push({pathname:"/recipe/published", …})` —— 它是**发布方案**时给自己建
+  “公开作品集”的接口，普通账号没有发布权限，所以 403（响应体为空）。同 token 的读接口、`C004/C005` 全 200，
+  两边 token 的 claims 也一样，可以排除 token 与请求形状。
+- **收藏改道**：新增 `IF_IR_R_LR002`（`POST /localrecipe/{guid}`，body `{name, createdBy, resourceId}`），把公共方案
+  复制进「我的方案库」（H05 的 `localRecipes`）。详情页「收藏」抽屉第一项改为「保存到我的方案库」，
+  收藏夹列表与「新建收藏夹并收藏」保留但降级。之后用 `IF_IR_R_C003` 把库里的方案加进相机池。
+- 新增 `CloudAccountApi.saveToLibrary` + `CloudFavoriteViewModel.saveToLibrary` + JVM 测试 1 项（断言三参数与文案）。
+- 127 项 JVM 测试 0 失败；lint 0 error / 6 warning（既有项）。
+- 顺手修：`CloudHttp.send()` 全程切 `Dispatchers.IO`（登录页在 Main 上调 `post()` 会抛
+  `NetworkOnMainThreadException`，而它的 message 是 null，日志里只留「网络失败：null」，白查了一轮）。
+- **未完成**：真机验证 LR002（设备当时被占用：横屏 + 通话中）。
+
 ## 版本历史
 
 | 版本 | 内容 | 真机 | 验收记录 |

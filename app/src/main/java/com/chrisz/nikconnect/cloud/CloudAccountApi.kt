@@ -15,6 +15,9 @@ internal interface CloudAccountApi {
 
     suspend fun createBook(name: String): String
 
+    /** 把方案复制进「我的方案库」（IF_IR_R_LR002）；返回新本地方案 ID。 */
+    suspend fun saveToLibrary(name: String, createdBy: String, resourceId: String): String
+
     // ---- 相机与槽位（账号页用；抽到接口是为了让续期/重试逻辑能在 JVM 测试里被驱动） ----
 
     suspend fun listCameras(): List<CloudCamera>

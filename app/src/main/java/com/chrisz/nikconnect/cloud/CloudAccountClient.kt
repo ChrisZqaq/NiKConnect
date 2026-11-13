@@ -294,6 +294,33 @@ internal class CloudAccountClient(
      * 这里按「text/plain → application/json → access_token 头 → 带尾斜杠」逐个试，命中即返回，
      * 并把每次尝试的状态写进日志（`CloudDebug` 也会落盘），便于后续收敛成唯一写法。
      */
+    /**
+     * `IF_IR_R_LR002` = `POST /localrecipe/{guid}`，body `{name, createdBy, resourceId}`。
+     *
+     * 与收藏夹（publicbook）无关：它把一条**公共方案**复制进「我的方案库」，也就是 H05 里的
+     * `localRecipes`。真机上 `publicbook` 建夹一直 403（publish 流程才用），而方案库这条路
+     * 是「我的方案」清单本身，之后可用 `IF_IR_R_C003` 加进相机池。
+     */
+    override suspend fun saveToLibrary(
+        name: String,
+        createdBy: String,
+        resourceId: String,
+    ): String = withContext(Dispatchers.IO) {
+        val body = buildJsonObject {
+            put("name", JsonPrimitive(name))
+            put("createdBy", JsonPrimitive(createdBy))
+            put("resourceId", JsonPrimitive(resourceId))
+        }.toString()
+        http.post(
+            "$IR_HOST/localrecipe/$guid",
+            body,
+            bearer,
+            "IF_IR_R_LR002",
+            contentType = "application/json",
+        )
+        resourceId
+    }
+
     override suspend fun createBook(name: String): String = withContext(Dispatchers.IO) {
         val body = buildBookBody(name)
         val attempts = listOf(

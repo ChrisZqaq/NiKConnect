@@ -77,6 +77,14 @@ class CloudFavoriteViewModelTest {
             return createBookResult
         }
 
+        var librarySave: Triple<String, String, String>? = null
+
+        override suspend fun saveToLibrary(name: String, createdBy: String, resourceId: String): String {
+            favoriteError?.let { throw it }
+            librarySave = Triple(name, createdBy, resourceId)
+            return resourceId
+        }
+
         // 收藏流程不碰槽位：这些方法只为满足接口
         override suspend fun listCameras(): List<CloudCamera> = emptyList()
 
@@ -195,5 +203,22 @@ class CloudFavoriteViewModelTest {
         assertTrue(state.error.orEmpty().startsWith("IF_IR_R_PB002"))
         assertTrue(state.error.orEmpty().contains("401"))
         assertFalse(state.working)
+    }
+
+    @Test
+    fun `saveToLibrary copies recipe into own library instead of a book`() = runTest {
+        val fake = FakeApi()
+        val vm = CloudFavoriteViewModel("token", "guid", apiFactory = { _, _ -> fake })
+        vm.saveToLibrary("01RECIPE", "Mate Film by Choi matae", "Choi matae")
+        advanceUntilIdle()
+
+        assertEquals(
+            Triple("Mate Film by Choi matae", "Choi matae", "01RECIPE"),
+            fake.librarySave,
+        )
+        val state = vm.state.value
+        assertFalse(state.working)
+        assertNull(state.error)
+        assertTrue(state.notice.orEmpty().contains("方案库"))
     }
 }
