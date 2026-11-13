@@ -5,6 +5,8 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,6 +33,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -53,6 +56,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.chrisz.nikconnect.cloud.CloudRecipe
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -120,8 +124,18 @@ internal fun CloudAccountScreen(
                 onCancelEdit = model::cancelEdit,
                 onMove = model::moveSlot,
                 onClear = model::clearSlot,
+                onPick = model::openSlotPicker,
                 onSave = model::saveLayout,
                 onNoticeShown = model::consumeNotice,
+            )
+        }
+        state.pickingSlot?.let { position ->
+            SlotPicker(
+                position = position,
+                state = state,
+                onPick = { recipe -> model.fillSlot(position, recipe) },
+                onRetry = { model.loadAssignable() },
+                onDismiss = model::dismissSlotPicker,
             )
         }
     }
@@ -266,6 +280,7 @@ private fun SlotSection(
     onCancelEdit: () -> Unit,
     onMove: (Int, Int) -> Unit,
     onClear: (Int) -> Unit,
+    onPick: (Int) -> Unit,
     onSave: () -> Unit,
     onNoticeShown: () -> Unit,
 ) {
@@ -311,7 +326,7 @@ private fun SlotSection(
             } else {
                 TextButton(
                     onClick = onEdit,
-                    enabled = state.slots.any { it.occupied },
+                    enabled = state.slots.isNotEmpty(),
                     modifier = Modifier.heightIn(min = 48.dp),
                 ) { Text("编辑排布") }
             }
@@ -334,7 +349,7 @@ private fun SlotSection(
 
         if (editing) {
             Text(
-                "长按拖动换位 · 点击清空该槽位 · 保存后相机联网时会重新拉取排布",
+                "长按拖动换位 · 点击已占用槽位＝清空 · 点击空槽位＝从可分配池挑方案 · 保存后相机联网时会重新拉取",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -371,7 +386,10 @@ private fun SlotSection(
                                         },
                                     )
                                 }
-                                .clickable { onClear(position) }
+                                .clickable {
+                                    // 有方案 → 清空；空位 → 从可分配池里挑一个
+                                    if (slot.occupied) onClear(position) else onPick(position)
+                                }
                         } else {
                             Modifier
                         },
@@ -421,7 +439,7 @@ private fun SlotSection(
         }
 
         Text(
-            "说明：云创方案占相机内的 9 个云创槽位（独立存储区），不是机身菜单的 C-1…C-9。排布提交到账号后，相机联网时会自己拉取；App 不代理方案文件。",
+            "说明：云创方案占相机内的 9 个云创槽位（独立存储区），不是机身菜单的 C-1…C-9。编辑态下长按拖动换位、点击清空；有方案时保存＝整体覆盖排布，全部清空后保存＝逐个删除方案（`DELETE`）。提交到账号后，相机联网时会自己拉取；App 不代理方案文件。",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -457,4 +475,78 @@ private fun Notice(text: String) {
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.error,
     )
+}
+
+/**
+ * 空槽位选方案：只从「账号可分配池」（`IF_FR100_H13`）里挑。
+ *
+ * 为什么不能从 144 目录直接选：方案必须先收藏进账号的书，才会出现在可分配池；
+ * 收藏是 `POST /publicrecipe/{guid}`，属于下一批。这里把边界显式告诉用户，
+ * 而不是给一个"点了没反应"的列表。
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun SlotPicker(
+    position: Int,
+    state: CloudAccountState,
+    onPick: (CloudRecipe) -> Unit,
+    onRetry: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                "为第 ${position + 1} 个槽位选择方案",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                "来源：账号可分配池（${state.assignable.size} 个）",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            if (state.loadingAssignable) {
+                Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
+                }
+            } else if (state.assignable.isEmpty()) {
+                Text(
+                    state.assignableError
+                        ?: "可分配池是空的。先在云创网页把方案收藏到你的书，再回来这里挑选。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                state.rawSnippet?.let { RawSnippet(it) }
+                TextButton(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) { Text("重新读取") }
+            } else {
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
+                    items(state.assignable, key = { it.id }) { recipe ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onPick(recipe) }
+                                .padding(vertical = 12.dp),
+                        ) {
+                            Text(recipe.name, style = MaterialTheme.typography.bodyMedium)
+                            if (recipe.pictureControlName.isNotBlank()) {
+                                Text(
+                                    recipe.pictureControlName,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+                    }
+                }
+            }
+        }
+    }
 }

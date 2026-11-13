@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-- **版本**：0.6.6-alpha（0.6 批次 2：云创槽位排布可编辑——长按拖动换位、点击清空、`PATCH /camera/{guid}/{deviceId}` 写回后重新 GET 校对；JVM 74 项测试通过，真机待验）
+- **版本**：0.6.7-alpha（0.6 批次 2：排布编辑 + 空槽位从可分配池选方案；清空到底改走 `DELETE`，修掉空数组 PATCH 的 422；JVM 78 项测试通过，真机待验）
 - **真机基线**：一加 Ace 5 Pro + Nikon Zf
 - **未关闭验证**：0.4 RAW 哈希/分块对照；0.5 遗留三项（在线刷新频控、详情参数与官网逐项对照、蜂窝网络封面流量）；0.6 只读部分的细节项（槽位号与网页端逐位对照、已占用/空位区分、可分配方案数、token 长时失效）见 [docs/acceptance/0.6.md](docs/acceptance/0.6.md)；0.6 批次 2（拖拽排布、收藏到书）未开工
 
@@ -390,6 +390,28 @@ if (c.length) { if (!await R(m, _, x.deviceId, c)) a.push("/systemError") }
 - `ui/CloudAccountViewModel.kt`：`draft`（编辑态副本，与服务端数据分离）+ `saving`/`saveError`/`savedNotice`；`beginEdit`/`cancelEdit`/`moveSlot(from,to)`/`clearSlot(position)`/`saveLayout`/`consumeNotice`。`saveLayout` 成功后**重新 GET 一次 C002**，以服务端结果覆盖 draft——不信本地。
 - `ui/CloudAccountScreen.kt`：槽位区改为可编辑——`编辑排布` 进入编辑态，`长按拖动换位`（`detectDragGesturesAfterLongPress` + 固定 64dp 行高算位移），`点击清空该槽位`，`保存到相机`（保存中显示进度），`撤销` 丢弃 draft。
 - 测试：新增 3 项 body 构造用例（排序、空 recipeId 过滤、全空），JVM 74 项全绿。
+
+## 2026-11-13 · 0.6.7：清空到底改走 DELETE，空槽位可挑方案
+
+真机反馈（0.6.6）：相机上只有一个槽位，无法换位；把唯一槽位删掉并保存 → `IF_IR_R_C004` 422。
+
+根因（有依据）：0.6.6 的保存逻辑只要 draft 里有内容就一律 PATCH，**全清空时发的是 `{"recipes":[]}`**。而 Web 端的写法是
+
+```js
+if (c.length) { if (!await R(m, _, x.deviceId, c)) a.push("/systemError") }
+else V().debug("newRecipeIdList length 0")   // ← 空数组根本不发请求
+```
+
+即空数组不在 C004 契约里；删除单个槽位方案在 Web 端走的是另一条：`IF_IR_R_C005` = `DELETE /camera/{guid}/{deviceId}/{recipeId}`。
+
+- 新增 `planSlotWrite(before, after): CloudSlotWritePlan`（纯函数，在 `cloud/CloudAccountClient.kt`）：
+  - 顺序没变 → `noop`
+  - 全部清空 → `deletes`（逐条 C005），`assignments = null`
+  - 其它 → 一次 C004 全量覆盖（空位靠缺席表达）
+- `saveLayout()` 改用计划执行，失败时 `rawSnippet` 打印**实际请求体** + 响应原文。
+- `describe()` 里 422 不再武断说"账号 ID 不对"（空数组/缺字段都会 422），改为如实回显服务端原文。
+- 空槽位可挑方案：`openSlotPicker`/`fillSlot` + `loadAssignable`（`IF_FR100_H13`）；编辑态点击空槽位弹 `SlotPicker` 底部抽屉，来源是**账号可分配池**。池为空时提示"先在云创网页收藏方案"——收藏（`POST /publicrecipe/{guid}`）属于下一批。
+- 测试 +4（顺序没变、换位、全清空走删除、空位新增），JVM 78 项全绿。
 
 ## 开放问题
 

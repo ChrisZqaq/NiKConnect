@@ -107,6 +107,22 @@ internal class CloudAccountClient(
         raw
     }
 
+    /**
+     * 删除相机上的单个云创槽位方案（`IF_IR_R_C005`）。
+     *
+     * Web 端删除是**逐条 DELETE**，不是靠"提交缺省的空数组"——`replaceSlots` 传空数组
+     * 不在契约内（Web 端 `if (c.length)` 直接跳过 PATCH），服务端会回 422。
+     */
+    suspend fun deleteSlot(cameraId: String, recipeId: String) = withContext(Dispatchers.IO) {
+        http.request(
+            method = "DELETE",
+            url = "$IR_HOST/camera/$guid/$cameraId/$recipeId",
+            body = null,
+            headers = bearer,
+            callId = "IF_IR_R_C005",
+        )
+    }
+
     suspend fun assignableRecipes(): List<CloudRecipe> = withContext(Dispatchers.IO) {
         val raw = http.post(
             "$CWP_HOST/bff/recipe/camera",
@@ -258,4 +274,34 @@ internal class CloudAccountClient(
         )
         private val ASSIGNABLE_KEYS = listOf("recipe", "recipes", "list", "items", "cameraRecipes")
     }
+}
+
+/**
+ * 一次排布写回的"该发什么请求"。抽成纯函数是因为这里最容易搞错：
+ *
+ * - 顺序没变 → 什么都不发（避免无意义的 PATCH）
+ * - 全部清空 → **只能逐条 DELETE**（C005）。`{"recipes":[]}` 不在 C004 契约里，
+ *   Web 端 `if (c.length)` 会直接跳过 PATCH；我们真机验证过空数组会回 422。
+ * - 其它变化 → 一次 PATCH 全量覆盖（空位靠缺席表达）
+ */
+internal data class CloudSlotWritePlan(
+    val noop: Boolean = false,
+    /** 需要逐条删除的方案（只在"全部清空"时使用）。 */
+    val deletes: List<String> = emptyList(),
+    /** 需要 PATCH 的排布；null 表示不发 PATCH。 */
+    val assignments: List<CloudSlotAssignment>? = null,
+) {
+    val callId: String get() = if (assignments == null) "IF_IR_R_C005" else "IF_IR_R_C004"
+}
+
+/**
+ * @param before 服务端当前的已占用方案（按槽位顺序）
+ * @param after  编辑后界面上的已占用方案（按槽位顺序）
+ */
+internal fun planSlotWrite(before: List<String>, after: List<String>): CloudSlotWritePlan {
+    if (before == after) return CloudSlotWritePlan(noop = true)
+    if (after.isEmpty()) return CloudSlotWritePlan(deletes = before.distinct())
+    return CloudSlotWritePlan(
+        assignments = after.mapIndexed { position, recipeId -> CloudSlotAssignment(position + 1, recipeId) },
+    )
 }

@@ -1,6 +1,7 @@
 package com.chrisz.nikconnect.cloud
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -202,5 +203,50 @@ class CloudAccountClientTest {
     @Test
     fun `slot body with nothing occupied is an empty list`() {
         assertEquals("""{"recipes":[]}""", client().buildSlotBody(emptyList()))
+    }
+
+    // ---- 写回计划（planSlotWrite） ----
+
+    @Test
+    fun `unchanged layout plans nothing`() {
+        val plan = planSlotWrite(listOf("A", "B"), listOf("A", "B"))
+        assertTrue(plan.noop)
+        assertNull(plan.assignments)
+        assertTrue(plan.deletes.isEmpty())
+    }
+
+    @Test
+    fun `reorder plans a full patch with one-based slot numbers`() {
+        val plan = planSlotWrite(listOf("A", "B"), listOf("B", "A"))
+        assertFalse(plan.noop)
+        assertEquals(
+            listOf(
+                CloudSlotAssignment(slotNo = 1, recipeId = "B"),
+                CloudSlotAssignment(slotNo = 2, recipeId = "A"),
+            ),
+            plan.assignments,
+        )
+        assertEquals("IF_IR_R_C004", plan.callId)
+    }
+
+    /** 真机踩过：全清空时发 `{"recipes":[]}` 被服务端回 422，Web 端根本不会发这个请求。 */
+    @Test
+    fun `clearing every slot plans deletes instead of an empty patch`() {
+        val plan = planSlotWrite(listOf("A"), emptyList())
+        assertNull(plan.assignments)
+        assertEquals(listOf("A"), plan.deletes)
+        assertEquals("IF_IR_R_C005", plan.callId)
+    }
+
+    @Test
+    fun `adding into an empty slot plans a patch`() {
+        val plan = planSlotWrite(listOf("A"), listOf("A", "C"))
+        assertEquals(
+            listOf(
+                CloudSlotAssignment(slotNo = 1, recipeId = "A"),
+                CloudSlotAssignment(slotNo = 2, recipeId = "C"),
+            ),
+            plan.assignments,
+        )
     }
 }

@@ -6,8 +6,10 @@ import com.chrisz.nikconnect.cloud.CloudAccountClient
 import com.chrisz.nikconnect.cloud.CloudCamera
 import com.chrisz.nikconnect.cloud.CloudException
 import com.chrisz.nikconnect.cloud.CloudSlot
+import com.chrisz.nikconnect.cloud.CloudRecipe
 import com.chrisz.nikconnect.cloud.CloudSlotAssignment
 import com.chrisz.nikconnect.cloud.guidCandidates
+import com.chrisz.nikconnect.cloud.planSlotWrite
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -36,6 +38,12 @@ internal data class CloudAccountState(
     val saveError: String? = null,
     /** 保存成功的瞬时提示（UI 消费后置空）。 */
     val savedNotice: String? = null,
+    /** 账号可分配池（`IF_FR100_H13`）：空槽位只能从这里挑，不能凭空塞。 */
+    val assignable: List<CloudRecipe> = emptyList(),
+    val loadingAssignable: Boolean = false,
+    val assignableError: String? = null,
+    /** 正在为哪个槽位挑方案（null = 选择器关闭）。 */
+    val pickingSlot: Int? = null,
     val rawSnippet: String? = null,
     /** 需要用户去网页「相机」页重新捕获账号 ID 时置 true（当前 guid 不被服务端接受）。 */
     val needsGuidRefresh: Boolean = false,
@@ -155,6 +163,7 @@ internal class CloudAccountViewModel(
 
     fun openCamera(camera: CloudCamera) {
         val guid = workingGuid ?: _state.value.guid ?: return
+        loadAssignable(guid)
         val requestId = ++slotRequestId
         _state.update { it.copy(selected = camera, slots = emptyList(), slotsError = null, loadingSlots = true) }
         viewModelScope.launch {
@@ -194,6 +203,60 @@ internal class CloudAccountViewModel(
         slotRequestId++
         _state.value = CloudAccountState(guid = guid ?: _state.value.guid)
         refreshCameras()
+    }
+
+    // ---- 可分配方案池（IF_FR100_H13） ----
+
+    /**
+     * 拉"账号可分配方案"。它决定空槽位能放什么：只能放这个池里的方案。
+     * 池为空通常意味着账号书里还没有方案——需要先在云创网页收藏，App 不代做。
+     */
+    fun loadAssignable(explicitGuid: String? = null) {
+        val guid = explicitGuid ?: workingGuid ?: _state.value.guid ?: return
+        if (_state.value.loadingAssignable) return
+        _state.update { it.copy(loadingAssignable = true, assignableError = null) }
+        viewModelScope.launch {
+            val client = CloudAccountClient(accessToken = accessToken, guid = guid)
+            try {
+                val recipes = client.assignableRecipes()
+                _state.update {
+                    it.copy(assignable = recipes, loadingAssignable = false, assignableCount = recipes.size)
+                }
+            } catch (e: CloudException) {
+                _state.update {
+                    it.copy(
+                        loadingAssignable = false,
+                        assignableError = describe(e, "IF_FR100_H13"),
+                        rawSnippet = e.message,
+                    )
+                }
+            }
+        }
+    }
+
+    fun openSlotPicker(position: Int) {
+        if (_state.value.draft == null) return
+        _state.update { it.copy(pickingSlot = position) }
+        if (_state.value.assignable.isEmpty()) loadAssignable()
+    }
+
+    fun dismissSlotPicker() {
+        _state.update { it.copy(pickingSlot = null) }
+    }
+
+    /** 把一个可分配方案放进指定槽位（只改 draft，仍需「保存到相机」才写回）。 */
+    fun fillSlot(position: Int, recipe: CloudRecipe) {
+        val draft = _state.value.draft ?: return
+        if (position !in draft.indices) return
+        val next = draft.toMutableList()
+        next[position] = CloudSlot(
+            index = next[position].index,
+            recipeId = recipe.id,
+            name = recipe.name,
+            pictureControlName = recipe.pictureControlName,
+            modifiedAt = "",
+        )
+        _state.update { it.copy(draft = next, pickingSlot = null, saveError = null) }
     }
 
     // ---- 排布编辑（0.6 批次 2：IF_IR_R_C004 写入） ----
@@ -238,27 +301,52 @@ internal class CloudAccountViewModel(
         val draft = _state.value.draft ?: return
         if (_state.value.saving) return
         val guid = workingGuid ?: _state.value.guid ?: return
-        val assignments = draft.mapIndexedNotNull { position, slot ->
-            val recipeId = slot.recipeId?.takeIf { it.isNotBlank() } ?: return@mapIndexedNotNull null
-            CloudSlotAssignment(slotNo = position + 1, recipeId = recipeId)
+
+        val before = _state.value.slots.sortedBy { it.index }
+            .mapNotNull { it.recipeId?.takeIf { id -> id.isNotBlank() } }
+        val after = draft.mapNotNull { it.recipeId?.takeIf { id -> id.isNotBlank() } }
+        if (before == after) {
+            _state.update { it.copy(draft = null, savedNotice = "排布没有变化") }
+            return
         }
+        val plan = planSlotWrite(before, after)
+        val callId = plan.callId
+
         _state.update { it.copy(saving = true, saveError = null) }
         viewModelScope.launch {
             val client = CloudAccountClient(accessToken = accessToken, guid = guid)
             try {
-                client.replaceSlots(camera.id, assignments)
+                // 全清空（after 为空）只能用逐条 DELETE：C004 的空数组不在契约里，服务端回 422。
+                val assignments = plan.assignments
+                if (assignments == null) {
+                    plan.deletes.forEach { client.deleteSlot(camera.id, it) }
+                } else {
+                    client.replaceSlots(camera.id, assignments)
+                }
                 val refreshed = client.cameraSlots(camera.id)
                 _state.update {
                     it.copy(
                         slots = refreshed,
-                        draft = refreshed.sortedBy { slot -> slot.index },
+                        draft = null,
                         saving = false,
-                        savedNotice = "已提交 ${assignments.size} 个槽位",
+                        savedNotice = if (plan.assignments == null) {
+                            "已删除 ${plan.deletes.size} 个槽位方案"
+                        } else {
+                            "已提交 ${plan.assignments.size} 个槽位"
+                        },
                     )
                 }
             } catch (e: CloudException) {
                 _state.update {
-                    it.copy(saving = false, saveError = describe(e, "IF_IR_R_C004"), rawSnippet = e.message)
+                    it.copy(
+                        saving = false,
+                        saveError = describe(e, callId),
+                        rawSnippet = if (plan.assignments == null) {
+                            "DELETE ${plan.deletes.size} 个方案\n${e.message}"
+                        } else {
+                            "请求体：${runCatching { client.buildSlotBody(plan.assignments) }.getOrDefault("?")}\n${e.message}"
+                        },
+                    )
                 }
             }
         }
@@ -285,7 +373,9 @@ internal class CloudAccountViewModel(
     } else when {
         e.errorCode.isNotBlank() -> "$callId 返回 ${e.errorCode}"
         e.httpStatus == 401 || e.httpStatus == 403 -> "$callId 认证失败（${e.httpStatus}）：token 可能已过期，重新登录一次"
-        e.httpStatus == 422 -> "$callId 不认这个账号 ID（422）。已在账号中心取过权威值，若仍报错说明 token 与账号不匹配，退出重登一次。"
+        // 422 不等于「账号 ID 错」：空数组、缺字段、不含法参数都可能回 422。
+        // 这里只如实给出服务端原文，不替它下结论。
+        e.httpStatus == 422 -> "$callId 被服务端拒绝（422）：${e.message.orEmpty()}"
         else -> e.message.orEmpty()
     }
 
