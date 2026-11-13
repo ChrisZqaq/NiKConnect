@@ -21,6 +21,8 @@ internal interface CloudAccountApi {
      * `createdBy` 是**数字枚举**（网页端 `W.v0.RELEASE_RECIPE` = `2`），不是作者名——
      * 真机实测传作者名会被 422 拒掉。
      */
+    suspend fun removeFromLibrary(localIds: List<String>): String
+
     suspend fun saveToLibrary(name: String, resourceId: String, createdBy: Int = 2): String
 
     // ---- 相机与槽位（账号页用；抽到接口是为了让续期/重试逻辑能在 JVM 测试里被驱动） ----

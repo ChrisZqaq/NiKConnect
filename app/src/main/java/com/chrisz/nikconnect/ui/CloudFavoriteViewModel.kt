@@ -4,8 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.chrisz.nikconnect.cloud.CloudAccountApi
 import com.chrisz.nikconnect.cloud.CloudAccountClient
-import com.chrisz.nikconnect.cloud.CloudBook
 import com.chrisz.nikconnect.cloud.CloudException
+import com.chrisz.nikconnect.cloud.OwnedRecipe
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -13,24 +13,22 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
- * 「收藏」的状态。
+ * 详情页收藏按钮的状态。
  *
- * 这一层存在的理由：官方 144 个方案不在账号里，只能看到、不能分配；要让它进
- * `IF_FR100_H13` 的可分配池（也就是能排进相机 9 个槽位），必须先
- * `POST /publicrecipe/{guid}` 把它**复制**进自己的一个收藏夹。这是本 App 第一处真正改账号数据的操作。
+ * 语义（真机实测）：
+ * - 收藏 = `IF_IR_R_LR002` `POST /localrecipe/{guid}` `{name, createdBy:2, resourceId}` → 202
+ * - 取消收藏 = `IF_IR_R_LR003` `PUT /localrecipe/{guid}` `{recipeIds:[本地id]}` → 200
+ *   （这条 PUT **是删除**，不是替换整库；网页端删除流程按 100 一批调它）
+ * - 「是否已收藏」只能按名字比对：H05 的 `localRecipes` 没有指回源公共方案的字段
  */
 internal data class CloudFavoriteState(
-    val books: List<CloudBook> = emptyList(),
-    val recipeCount: Int = 0,
+    val collected: OwnedRecipe? = null,
     val loading: Boolean = false,
-    val error: String? = null,
     val working: Boolean = false,
-    val phase: String? = null,
+    val error: String? = null,
     val notice: String? = null,
     val detail: String? = null,
-) {
-    val canCreateBook: Boolean get() = books.size < CloudBook.MAX_BOOKS
-}
+)
 
 internal class CloudFavoriteViewModel(
     token: String,
@@ -44,6 +42,7 @@ internal class CloudFavoriteViewModel(
     private var currentRefresh: String? = refreshToken
     private var refreshAttempted = false
     private var accountGuid: String = guid.orEmpty()
+    private var knownName: String = ""
 
     private val _state = MutableStateFlow(CloudFavoriteState())
     val state: StateFlow<CloudFavoriteState> = _state.asStateFlow()
@@ -55,109 +54,34 @@ internal class CloudFavoriteViewModel(
         if (nextToken == accessToken && nextGuid == accountGuid) return
         accessToken = nextToken
         accountGuid = nextGuid
+        refreshAttempted = false
         _state.value = CloudFavoriteState()
+        if (knownName.isNotBlank()) loadCollection(knownName)
     }
 
-    fun loadBooks() {
-        if (_state.value.loading || accountGuid.isBlank()) return
-        _state.update { it.copy(loading = true, error = null) }
+    /** 打开详情页时查一次「这个方案在不在我的收藏里」。 */
+    fun loadCollection(recipeName: String) {
+        if (recipeName.isBlank() || accountGuid.isBlank()) return
+        knownName = recipeName
+        if (_state.value.loading) return
+        _state.update { it.copy(loading = true, error = null, detail = null) }
         viewModelScope.launch {
             try {
                 ensureGuid()
                 val mine = withSession { api().fetchMyRecipes() }
-                _state.update {
-                    it.copy(
-                        books = mine.books,
-                        recipeCount = mine.recipeCount,
-                        loading = false,
-                    )
-                }
+                val hit = mine.recipes.firstOrNull { it.name.equals(recipeName, ignoreCase = true) }
+                _state.update { it.copy(loading = false, collected = hit) }
             } catch (e: Exception) {
                 _state.update { it.copy(loading = false, error = describe(e, "IF_FR100_H05"), detail = detailOf(e)) }
             }
         }
     }
 
-    /**
-     * 把方案复制进指定的书（`IF_IR_R_PR001`）。
-     *
-     * 同名方案重复收藏会各生成一份，服务端不查重——这是 Web 端行为，这里照抄，不擅自去重。
-     */
-    fun favoriteInto(recipeId: String, book: CloudBook) {
+    /** 未收藏 → 收藏；已收藏时由 UI 先弹二次确认，再调 [removeFromCollection]。 */
+    fun toggleCollection(recipeId: String, recipeName: String) {
         if (recipeId.isBlank() || _state.value.working) return
-        if (book.recipeCount >= CloudBook.MAX_RECIPES_PER_BOOK) {
-            _state.update { it.copy(error = "《${book.label}》已满 ${CloudBook.MAX_RECIPES_PER_BOOK} 个方案，换一个收藏夹或新建。") }
-            return
-        }
-        _state.update { it.copy(working = true, error = null, detail = null, phase = "正在收藏…") }
-        viewModelScope.launch {
-            try {
-                ensureGuid()
-                val created = withSession { api().favoriteRecipes(book.id, listOf(recipeId)) }
-                _state.update {
-                    it.copy(
-                        working = false,
-                        phase = null,
-                        notice = if (created.isEmpty()) {
-                            "已收藏到《${book.label}》"
-                        } else {
-                            "已收藏到《${book.label}》（共 ${created.size} 个）"
-                        },
-                    )
-                }
-                refreshBooksQuietly()
-            } catch (e: Exception) {
-                _state.update {
-                    it.copy(working = false, phase = null, error = describe(e, "IF_IR_R_PR001"), detail = detailOf(e))
-                }
-            }
-        }
-    }
-
-    /** 没有书、或想单独放时：新建一本再收藏（`IF_IR_R_PB002` → `IF_IR_R_PR001`）。 */
-    fun createBookAndFavorite(recipeId: String, name: String = DEFAULT_BOOK_NAME) {
-        if (recipeId.isBlank() || _state.value.working) return
-        if (!_state.value.canCreateBook) {
-            _state.update { it.copy(error = "一个账号最多 ${CloudBook.MAX_BOOKS} 个收藏夹，先在网页端删一个。") }
-            return
-        }
-        _state.update { it.copy(working = true, error = null, detail = null, phase = "正在新建收藏夹…") }
-        viewModelScope.launch {
-            try {
-                ensureGuid()
-                val bookId = withSession { api().createBook(name) }
-                _state.update { it.copy(phase = "正在把方案放进新收藏夹…") }
-                val created = withSession { api().favoriteRecipes(bookId, listOf(recipeId)) }
-                _state.update {
-                    it.copy(
-                        working = false,
-                        phase = null,
-                        notice = if (created.isEmpty()) {
-                            "已新建《$name》并收藏"
-                        } else {
-                            "已新建《$name》并收藏 ${created.size} 个方案"
-                        },
-                    )
-                }
-                refreshBooksQuietly()
-            } catch (e: Exception) {
-                _state.update {
-                    it.copy(working = false, phase = null, error = describe(e, "IF_IR_R_PB002"), detail = detailOf(e))
-                }
-            }
-        }
-    }
-
-    /**
-     * 收藏 = 复制进「我的方案库」（`IF_IR_R_LR002`），不碰收藏夹。
-     *
-     * 真机实测：`POST /publicbook/{guid}`（建收藏夹）对我们这种普通账号一直 403，且网页端只在
-     * “发布方案”流程里调它；而方案库（H05 的 `localRecipes`）是「我的方案」本身，复制进去之后
-     * 就能用 `IF_IR_R_C003` 加进相机池。所以收藏按钮走这条路。
-     */
-    fun saveToLibrary(recipeId: String, recipeName: String) {
-        if (recipeId.isBlank() || _state.value.working) return
-        _state.update { it.copy(working = true, error = null, detail = null, phase = "正在保存到我的方案库…") }
+        if (_state.value.collected != null) return
+        _state.update { it.copy(working = true, error = null, detail = null) }
         viewModelScope.launch {
             try {
                 ensureGuid()
@@ -167,13 +91,37 @@ internal class CloudFavoriteViewModel(
                         resourceId = recipeId,
                     )
                 }
+                val mine = runCatching { withSession { api().fetchMyRecipes() } }.getOrNull()
+                val hit = mine?.recipes?.firstOrNull { it.name.equals(recipeName, ignoreCase = true) }
                 _state.update {
-                    it.copy(working = false, phase = null, notice = "已收藏到「我的收藏」，可在槽位「＋」里选它")
+                    it.copy(
+                        working = false,
+                        collected = hit,
+                        notice = "已收藏，可在账号页槽位「＋」里选它",
+                    )
                 }
-                refreshBooksQuietly()
             } catch (e: Exception) {
                 _state.update {
-                    it.copy(working = false, phase = null, error = describe(e, "IF_IR_R_LR002"), detail = detailOf(e))
+                    it.copy(working = false, error = describe(e, "IF_IR_R_LR002"), detail = detailOf(e))
+                }
+            }
+        }
+    }
+
+    /** 取消收藏（`IF_IR_R_LR003`，传本地 id）。 */
+    fun removeFromCollection(localId: String) {
+        if (localId.isBlank() || _state.value.working) return
+        _state.update { it.copy(working = true, error = null, detail = null) }
+        viewModelScope.launch {
+            try {
+                ensureGuid()
+                withSession { api().removeFromLibrary(listOf(localId)) }
+                _state.update {
+                    it.copy(working = false, collected = null, notice = "已取消收藏")
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(working = false, error = describe(e, "IF_IR_R_LR003"), detail = detailOf(e))
                 }
             }
         }
@@ -183,13 +131,13 @@ internal class CloudFavoriteViewModel(
         _state.update { it.copy(error = null, detail = null) }
     }
 
+    fun consumeNotice() {
+        _state.update { it.copy(notice = null) }
+    }
+
     /**
-     * 收藏接口的路径里带账号 guid；登录时可能只抓到 token，所以这里先向 OIDC userinfo
-     * 要一次权威 guid（`GET .../protocol/openid-connect/userinfo`），避免拼出空段 URL。
-     */
-    /**
-     * access_token 只有几十分钟，收藏往往在过期后才被点到。这里照账号页的做法：
-     * 401/403 先拿 refresh_token 换新，换到了就重试一次，换不到才报「重新登录」。
+     * access_token 只有 5 分钟（`expires_in=300`），收藏往往在过期后才被点到。
+     * 401/403 先拿 refresh_token 换新，换到了就重试一次，换不到才报错。
      */
     private suspend fun <T> withSession(block: suspend () -> T): T {
         try {
@@ -211,13 +159,12 @@ internal class CloudFavoriteViewModel(
         accessToken = token
         currentRefresh = newRefresh ?: refresh
         onTokenRefreshed(token, currentRefresh)
-        runCatching { android.util.Log.d("NikConnect", "favorite token refreshed") }
         return true
     }
 
     private suspend fun ensureGuid() {
         // 登录时抓到的 guid 可能是从 URL 里猜的（方案 ID / bookId 都是 26 位 ULID，形态一样），
-        // 拿它拼 /publicbook/ 会得到 422，所以这里每次都问一次 OIDC userinfo 拿权威值。
+        // 拿它拼 /localrecipe/ 会 422，所以这里问一次 OIDC userinfo 拿权威值。
         val identity = runCatching { withSession { api().fetchIdentity() } }.getOrNull()
         if (identity != null && identity.guid.isNotBlank()) accountGuid = identity.guid
     }
@@ -227,18 +174,6 @@ internal class CloudFavoriteViewModel(
         return raw.takeIf { it.isNotBlank() }?.let { "详情：$it" }
     }
 
-    fun consumeNotice() {
-        _state.update { it.copy(notice = null) }
-    }
-
-    private fun refreshBooksQuietly() {
-        viewModelScope.launch {
-            runCatching { api().fetchMyRecipes() }.onSuccess { mine ->
-                _state.update { it.copy(books = mine.books, recipeCount = mine.recipeCount) }
-            }
-        }
-    }
-
     private fun api(): CloudAccountApi = apiFactory(accessToken, accountGuid)
 
     private fun describe(e: Throwable, callId: String): String = when {
@@ -246,9 +181,5 @@ internal class CloudFavoriteViewModel(
         e is CloudException && (e.httpStatus == 401 || e.httpStatus == 403) ->
             "$callId 认证失败（${e.httpStatus}）：重新登录一次云创"
         else -> "$callId：${e.message.orEmpty().ifBlank { e::class.simpleName.orEmpty() }}"
-    }
-
-    private companion object {
-        const val DEFAULT_BOOK_NAME = "NiKConnect"
     }
 }

@@ -73,6 +73,14 @@ internal class CloudHttp(
         contentType: String = "text/plain;charset=UTF-8",
     ): String = request("PATCH", url, body, headers, callId, contentType)
 
+    suspend fun put(
+        url: String,
+        body: String,
+        headers: Map<String, String>,
+        callId: String,
+        contentType: String = "text/plain;charset=UTF-8",
+    ): String = request("PUT", url, body, headers, callId, contentType)
+
     suspend fun post(
         url: String,
         body: String?,

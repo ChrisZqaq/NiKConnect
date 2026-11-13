@@ -301,6 +301,12 @@ internal class CloudAccountClient(
      * `localRecipes`。真机上 `publicbook` 建夹一直 403（publish 流程才用），而方案库这条路
      * 是「我的方案」清单本身，之后可用 `IF_IR_R_C003` 加进相机池。
      */
+    /** `IF_IR_R_LR003`：**删除**列出的本地方案 id（网页端删除流程就这么调，一次最多 100）。 */
+    override suspend fun removeFromLibrary(localIds: List<String>): String = withContext(Dispatchers.IO) {
+        val body = buildJsonObject { put("recipeIds", JsonArray(localIds.map { JsonPrimitive(it) })) }.toString()
+        http.put("$IR_HOST/localrecipe/$guid", body, bearer, "IF_IR_R_LR003", "application/json")
+    }
+
     override suspend fun saveToLibrary(
         name: String,
         resourceId: String,

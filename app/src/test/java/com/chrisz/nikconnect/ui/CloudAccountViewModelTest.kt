@@ -81,7 +81,8 @@ class CloudAccountViewModelTest {
 
         override suspend fun addRecipes(cameraId: String, recipeIds: List<String>): String = ""
 
-    override suspend fun saveToLibrary(name: String, resourceId: String, createdBy: Int): String = resourceId
+        override suspend fun saveToLibrary(name: String, resourceId: String, createdBy: Int): String = resourceId
+        override suspend fun removeFromLibrary(localIds: List<String>): String = ""
 
         override suspend fun refreshAccessToken(refreshToken: String): Pair<String, String?>? {
             refreshCalls++
