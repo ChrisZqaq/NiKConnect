@@ -70,8 +70,13 @@ internal class CloudHttp(
         contentType: String = "text/plain;charset=UTF-8",
     ): String = request("PATCH", url, body, headers, callId, contentType)
 
-    suspend fun post(url: String, body: String?, headers: Map<String, String>, callId: String): String =
-        request("POST", url, body, headers, callId)
+    suspend fun post(
+        url: String,
+        body: String?,
+        headers: Map<String, String>,
+        callId: String,
+        contentType: String = "text/plain;charset=UTF-8",
+    ): String = request("POST", url, body, headers, callId, contentType)
 
     /**
      * 发送并在频控时退避重试；其它错误码立即抛出。

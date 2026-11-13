@@ -93,6 +93,25 @@ internal data class CloudSlotAssignment(
     val recipeId: String,
 )
 
+/** 自己的书。一个书最多 200 个方案，一个账号最多 10 本（Web 端按钮 disabled 条件）。 */
+internal data class CloudBook(
+    val id: String,
+    val label: String,
+    val recipeCount: Int = 0,
+) {
+    companion object {
+        const val MAX_BOOKS = 10
+        const val MAX_RECIPES_PER_BOOK = 200
+    }
+}
+
+/** 「我的方案」总览（`IF_FR100_H05`）。 */
+internal data class CloudMyRecipes(
+    val books: List<CloudBook> = emptyList(),
+    val recipeCount: Int = 0,
+    val authority: Int = 0,
+)
+
 /**
  * `IF_FR100_H13` 的双重用途：可分配池（`recipe[]`）+ 每台相机的真实槽位排布（`camera[].recipeIds`）。
  * 两个字段在同一次响应里，所以一次请求就够，不必再多跑一趟。
@@ -203,6 +222,54 @@ internal class CloudAccountClient(
 
     suspend fun assignableRecipes(): List<CloudRecipe> = fetchAssignable().recipes
 
+    // ---- 我的书（收藏官方方案到自己账号的唯一通道） ----
+
+    /**
+     * `IF_FR100_H05` = `POST /bff/recipe`：我的方案总览，响应里带 `books[]`。
+     *
+     * 这是「账号里有什么」的真身，也是收藏的目标容器：一个书最多 200 个方案、
+     * 一个账号最多 10 本书（Web 端 `disabled: e.book.length >= 10` 与 `recipeCount >= 200`）。
+     */
+    suspend fun fetchMyRecipes(): CloudMyRecipes = withContext(Dispatchers.IO) {
+        val raw = http.post(
+            "$CWP_HOST/bff/recipe",
+            """{"filter":{},"country":"$country","lang_code":"zh-CN"}""",
+            mapOf("access_token" to accessToken),
+            "IF_FR100_H05",
+        )
+        parseMyRecipes(raw)
+    }
+
+    /**
+     * `IF_IR_R_PR001` = `POST /publicrecipe/{guid}`：把官方方案**复制**进自己的书。
+     *
+     * Web 端：`{method:"POST", headers:{Authorization: Bearer}, body:{bookId, recipeIds}}`，
+     * 返回体里的 `recipeIds` 是新建出来的本地方案 ID（与官方方案 ID 不同）。
+     */
+    suspend fun favoriteRecipes(bookId: String, recipeIds: List<String>): List<String> =
+        withContext(Dispatchers.IO) {
+            val raw = http.post(
+                "$IR_HOST/publicrecipe/$guid",
+                buildFavoriteBody(bookId, recipeIds),
+                bearer,
+                "IF_IR_R_PR001",
+                contentType = "application/json",
+            )
+            parseFavoriteResult(raw)
+        }
+
+    /** `IF_IR_R_PB002` = `POST /publicbook/{guid}`：新建一本书，返回新书 id。 */
+    suspend fun createBook(name: String): String = withContext(Dispatchers.IO) {
+        val raw = http.post(
+            "$IR_HOST/publicbook/$guid",
+            buildBookBody(name),
+            bearer,
+            "IF_IR_R_PB002",
+            contentType = "application/json",
+        )
+        parseCreatedBookId(raw)
+    }
+
     // ---- 解析（纯函数，供 JVM 测试） ----
 
     fun parseCameras(raw: String): List<CloudCamera> {
@@ -291,6 +358,61 @@ internal class CloudAccountClient(
         }.toMap()
     }
 
+    /**
+     * 解析「我的方案」总览：只取 `books[]` 与方案数，其它字段（filter/cameras/nis）本 App 不用。
+     */
+    fun parseMyRecipes(raw: String): CloudMyRecipes {
+        val element = http.parseElement(raw, "IF_FR100_H05")
+        val root = element as? JsonObject
+            ?: throw CloudException("IF_FR100_H05 返回的不是对象：${raw.take(160)}", httpStatus = -2)
+        val booksArray = (root["books"] as? JsonArray)
+            ?: http.findObjectArray(element, BOOK_KEYS, mustHave = "id")
+            ?: JsonArray(emptyList())
+        val books = booksArray.mapNotNull { el ->
+            val o = el as? JsonObject ?: return@mapNotNull null
+            val id = o.str("id")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            CloudBook(
+                id = id,
+                label = firstNonBlank(o, "label", "name", "bookName", "book_name").orEmpty(),
+                recipeCount = o.int("recipeCount") ?: o.int("recipe_count") ?: 0,
+            )
+        }
+        val recipes = (root["allLocalRecipes"] as? JsonArray) ?: (root["localRecipes"] as? JsonArray)
+        return CloudMyRecipes(
+            books = books,
+            recipeCount = recipes?.size ?: 0,
+            authority = root.int("authority") ?: 0,
+        )
+    }
+
+    fun parseFavoriteResult(raw: String): List<String> {
+        val element = http.parseElement(raw, "IF_IR_R_PR001")
+        val root = element as? JsonObject ?: return emptyList()
+        val ids = (root["recipeIds"] as? JsonArray)
+            ?: findStringArray(element, listOf("recipeIds", "recipes", "ids"))
+            ?: return emptyList()
+        return ids.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.takeIf { id -> id.isNotBlank() } }
+    }
+
+    fun parseCreatedBookId(raw: String): String {
+        val element = http.parseElement(raw, "IF_IR_R_PB002")
+        val o = element as? JsonObject
+            ?: throw CloudException("IF_IR_R_PB002 返回的不是对象：${raw.take(160)}", httpStatus = -2)
+        return firstNonBlank(o, "id", "bookId", "book_id")
+            ?: throw CloudException("新建书没有返回 id：${raw.take(200)}", httpStatus = -2)
+    }
+
+    /** PR001 的请求体（纯函数）：只带 bookId 与实际要复制的方案。 */
+    fun buildFavoriteBody(bookId: String, recipeIds: List<String>): String = buildJsonObject {
+        put("bookId", bookId)
+        put(
+            "recipeIds",
+            buildJsonArray { recipeIds.filter { it.isNotBlank() }.forEach { add(JsonPrimitive(it)) } },
+        )
+    }.toString()
+
+    fun buildBookBody(name: String): String = buildJsonObject { put("name", name) }.toString()
+
     /** PATCH body 构造（纯函数，便于单测）：只发已占用槽位，按 slotNo 升序。 */
     fun buildSlotBody(assignments: List<CloudSlotAssignment>): String = buildJsonObject {
         put(
@@ -355,6 +477,22 @@ internal class CloudAccountClient(
         )
     }
 
+    /** 在任意层级里找第一个「字符串数组」，用于 `recipeIds` 这类纯 ID 列表。 */
+    private fun findStringArray(element: JsonElement, keys: List<String>): JsonArray? {
+        when (element) {
+            is JsonObject -> {
+                keys.forEach { key ->
+                    val arr = element[key] as? JsonArray
+                    if (arr != null && arr.all { it is JsonPrimitive }) return arr
+                }
+                element.values.forEach { child -> findStringArray(child, keys)?.let { return it } }
+            }
+            is JsonArray -> element.forEach { child -> findStringArray(child, keys)?.let { return it } }
+            else -> Unit
+        }
+        return null
+    }
+
     private fun firstNonBlank(o: JsonObject, vararg keys: String): String? =
         keys.firstNotNullOfOrNull { key -> o.str(key)?.takeIf { it.isNotBlank() } }
 
@@ -365,6 +503,7 @@ internal class CloudAccountClient(
             "pictureControls", "pictureControl", "controlList", "list", "items",
         )
         private val ASSIGNABLE_KEYS = listOf("recipe", "recipes", "list", "items", "cameraRecipes")
+        private val BOOK_KEYS = listOf("books", "bookList", "book")
     }
 }
 

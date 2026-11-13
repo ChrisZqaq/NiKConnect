@@ -6,9 +6,9 @@
 
 ## 当前状态
 
-- **版本**：0.6.9-alpha（0.6 批次 2：槽位号改以 H13 `camera[].recipeIds` 为准，删除后空洞不再被抹平；`PATCH` 的 `slotNo` 取真实槽位；JVM 86 项测试通过）
+- **版本**：0.6.10-alpha（0.6 批次 2：新增「收藏到我的书」——官方方案复制进自己账号后才进可分配池；槽位号继续以 H13 `recipeIds` 为准；JVM 91 项测试通过）
 - **真机基线**：一加 Ace 5 Pro + Nikon Zf
-- **未关闭验证**：0.6.9 删除后位置保持、重新加回不再 400（用户真机待验）；0.4 RAW 哈希/分块对照；0.5 遗留三项（在线刷新频控、详情参数与官网逐项对照、蜂窝网络封面流量）；0.6 只读部分的细节项（槽位号与网页端逐位对照、已占用/空位区分、可分配方案数、token 长时失效）见 [docs/acceptance/0.6.md](docs/acceptance/0.6.md)；0.6 批次 2（拖拽排布、收藏到书）未开工
+- **未关闭验证**：0.6.9 删除后位置保持、重新加回不再 400；0.6.10 收藏官方方案后能否在账号页「＋」里挑到并排进槽位（均待用户真机验证）；0.4 RAW 哈希/分块对照；0.5 遗留三项（在线刷新频控、详情参数与官网逐项对照、蜂窝网络封面流量）；0.6 只读部分的细节项（槽位号与网页端逐位对照、已占用/空位区分、可分配方案数、token 长时失效）见 [docs/acceptance/0.6.md](docs/acceptance/0.6.md)；0.6 批次 2（拖拽排布、收藏到书）未开工
 
 ## 版本历史
 
@@ -444,11 +444,31 @@ else V().debug("newRecipeIdList length 0")   // ← 空数组根本不发请求
 - `ui/CloudAccountViewModel.kt`：新增私有 `fetchSlots(client, cameraId)`——先 H13 拿 `recipeIds` 与可分配池（顺带刷新池，避免删除后仍能选到陈旧项），再 C002 取详情合成；`openCamera`/`deleteSlot`/`saveLayout` 全部走它。
 - 测试 +6（空洞保留、`recipeIds` 优先于数组序、无排布时退回数组序、全删九格空、`parseLayouts` 正例/缺省），JVM 86 项全绿；lint 0 error / 6 warning。
 
+## 2026-11-14 · 0.6.10：收藏到我的书（官方方案 → 可分配池）
+
+上一轮把可分配池的问题讲清了：账号页「＋」里只有 3 个，是因为 `IF_FR100_H13` 的 `recipe[]` 只含**账号里已有**的方案，而官方 144 个属于公共目录（`bookId=01HXDNNTHY1AZ6RVMMXSXY3BTK` 那本）。要让它能排进相机槽位，必须先复制一份进自己的书。这一步补上。
+
+接口与语义（来自 Web chunk，非猜测）：
+
+- `IF_FR100_H05` = `POST /bff/recipe` header `access_token` body `{filter,country,lang_code}` → 返回 `books[]`（每项 `id`/`label`/`recipeCount`）、`allLocalRecipes`、`cameras`、`authority`。收藏的目标容器就在这里。
+- `IF_IR_R_PR001` = `POST /publicrecipe/{guid}` Bearer body `{bookId, recipeIds}` → 返回新建出来的本地方案 `recipeIds`（**新 ID，与官方方案 ID 不同**）。
+- `IF_IR_R_PB002` = `POST /publicbook/{guid}` Bearer body `{name}` → 返回新书 `id`。
+- 容量约束（Web 端 disabled 条件）：一本书 ≤ 200 个方案、一个账号 ≤ 10 本书。App 里直接前置拦截，不把注定失败的请求发出去。
+
+改动：
+
+- `cloud/CloudAccountClient.kt`：新增 `CloudBook(id,label,recipeCount)`（带 `MAX_BOOKS=10` / `MAX_RECIPES_PER_BOOK=200`）、`CloudMyRecipes(books,recipeCount,authority)`；方法 `fetchMyRecipes()`（H05）、`favoriteRecipes(bookId, recipeIds)`（PR001）、`createBook(name)`（PB002）；纯函数 `parseMyRecipes`/`parseFavoriteResult`/`parseCreatedBookId`/`buildFavoriteBody`/`buildBookBody`；`CloudHttp.post()` 补 `contentType` 参数。
+- `ui/CloudFavoriteViewModel.kt`（新）：`CloudFavoriteState(books,recipeCount,loading,error,working,notice)`；`loadBooks()`、`favoriteInto(recipeId, book)`、`createBookAndFavorite(recipeId, name="NiKConnect")`；收藏成功后静默重拉书列表（方案数会变）。
+- `ui/CloudFavoriteSheet.kt`（新）：详情页「收藏到我的书」按钮（未登录时降级为「登录云创后可收藏」→ 打开登录页）；`ModalBottomSheet` 列出所有书（含方案数、满 200 置灰）与「新建书并收藏」；错误/重试/进度齐备。
+- `ui/CloudBrowseScreen.kt`：`CloudRecipeDetailScreen` 增加 `favoriteToken`/`favoriteGuid`/`onNeedLogin`，参数与 `CloudTab` 的登录态打通；按钮位于方案名与 chip 行下方。
+
+验证：JVM 91 项全绿（+5：书列表解析、无书不报错、收藏结果 ID、新建书缺 id 报错、两个请求体），lint 0 error / 6 warning。
+
 ## 开放问题
 
 1. 真实图库规模（120 / 300 / 更大）→ 决定 0.2 分页与批量元数据优先级。
 2. 后台下载是否当前痛点 → 决定 0.3 排期。
 3. RAW 文件类型与大小分布 → 0.4 样本。
 4. NP3 写字段与机型能力（B0 探针前不排期）。
-5. 云创账号语义：`POST /publicrecipe/{guid}`（收藏到书）与 `PATCH /camera/{guid}/{cameraId}`（相机 9 槽排布）在 App 内的分工，批次 2 决定。
+5. 云创账号语义：收藏到书（`IF_IR_R_PR001`，0.6.10 已接）与相机 9 槽排布（`IF_IR_R_C004`，0.6.6–0.6.9 已接）的分工已确定——先收藏进书，方案才进可分配池，才能排进槽位；剩余待定项是「删除书里的方案」是否也要在 App 内做。
 6. 云创详情接口 IP 级频控（E01_0701）：是否需要把 144 个详情预取进 assets（体积/时效权衡）。

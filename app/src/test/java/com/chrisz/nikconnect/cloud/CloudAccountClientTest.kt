@@ -342,4 +342,59 @@ class CloudAccountClientTest {
     fun `parseLayouts tolerates a response without camera layout`() {
         assertTrue(client().parseLayouts("""{"statusCode":200,"body":{"recipe":[]}}""").isEmpty())
     }
+
+    // ---- 我的书 / 收藏（IF_FR100_H05 / IF_IR_R_PR001 / IF_IR_R_PB002） ----
+
+    @Test
+    fun `my recipes reads books with capacity info`() {
+        val raw = """
+            {"statusCode":200,"body":{
+              "authority":1,
+              "books":[{"id":"BOOK1","label":"我的收藏","recipeCount":3},{"id":"BOOK2","name":"旅行"}],
+              "allLocalRecipes":[{"id":"A"},{"id":"B"}],
+              "cameras":[]
+            }}
+        """.trimIndent()
+        val mine = client().parseMyRecipes(raw)
+        assertEquals(2, mine.books.size)
+        assertEquals("BOOK1", mine.books[0].id)
+        assertEquals("我的收藏", mine.books[0].label)
+        assertEquals(3, mine.books[0].recipeCount)
+        assertEquals("旅行", mine.books[1].label)
+        assertEquals(0, mine.books[1].recipeCount)
+        assertEquals(2, mine.recipeCount)
+        assertEquals(1, mine.authority)
+    }
+
+    @Test
+    fun `my recipes without books yields empty list not an error`() {
+        val mine = client().parseMyRecipes("""{"statusCode":200,"body":{"localRecipes":[]}}""")
+        assertTrue(mine.books.isEmpty())
+        assertEquals(0, mine.recipeCount)
+    }
+
+    @Test
+    fun `favorite result collects created recipe ids`() {
+        val raw = """{"statusCode":200,"body":{"bookId":"BOOK1","recipeIds":["L1","L2"]}}"""
+        assertEquals(listOf("L1", "L2"), client().parseFavoriteResult(raw))
+        // 没有 recipeIds 时不要炸：Web 端也只判断"有没有返回值"
+        assertTrue(client().parseFavoriteResult("""{"statusCode":200,"body":{}}""").isEmpty())
+    }
+
+    @Test
+    fun `created book id is required`() {
+        assertEquals("BOOK9", client().parseCreatedBookId("""{"statusCode":200,"body":{"id":"BOOK9"}}"""))
+        assertThrows(CloudException::class.java) {
+            client().parseCreatedBookId("""{"statusCode":200,"body":{"name":"x"}}""")
+        }
+    }
+
+    @Test
+    fun `favorite and book bodies match the web payloads`() {
+        assertEquals(
+            """{"bookId":"BOOK1","recipeIds":["A","B"]}""",
+            client().buildFavoriteBody("BOOK1", listOf("A", "", "B")),
+        )
+        assertEquals("""{"name":"NiKConnect"}""", client().buildBookBody("NiKConnect"))
+    }
 }

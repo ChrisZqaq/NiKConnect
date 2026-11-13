@@ -130,6 +130,9 @@ internal fun CloudTab(
             onBack = model::closeDetail,
             onPrev = { detail.previousId?.let(model::openDetail) },
             onNext = { detail.nextId?.let(model::openDetail) },
+            favoriteToken = cloudToken,
+            favoriteGuid = cloudGuid,
+            onNeedLogin = { loginStartUrl = CLOUD_INDEX_URL },
         )
 
         catalog.detailLoading -> DetailShell(onBack = model::closeDetail) {
@@ -472,6 +475,9 @@ private fun CloudRecipeDetailScreen(
     onBack: () -> Unit,
     onPrev: () -> Unit,
     onNext: () -> Unit,
+    favoriteToken: String?,
+    favoriteGuid: String?,
+    onNeedLogin: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
     Column(Modifier.fillMaxSize()) {
@@ -521,6 +527,14 @@ private fun CloudRecipeDetailScreen(
                         )
                     }
                 }
+
+                CloudFavoriteBar(
+                    recipeId = detail.id,
+                    recipeName = detail.name,
+                    token = favoriteToken,
+                    guid = favoriteGuid,
+                    onNeedLogin = onNeedLogin,
+                )
 
                 if (detail.description.isNotBlank()) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
