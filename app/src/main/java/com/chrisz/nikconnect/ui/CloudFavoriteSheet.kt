@@ -42,7 +42,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.chrisz.nikconnect.cloud.CloudBook
 
 /**
- * 详情页的「收藏到我的书」入口。
+ * 详情页的「收藏」入口。
  *
  * 为什么需要它：官方目录里的方案只是"看得见"，账号里没有它就不能分配给相机。
  * `IF_IR_R_PR001` 会把它复制一份进自己的书，之后才会出现在
@@ -63,7 +63,7 @@ internal fun CloudFavoriteBar(
             shape = RoundedCornerShape(12.dp),
         ) {
             Icon(Icons.Filled.BookmarkAdded, contentDescription = null, modifier = Modifier.size(18.dp))
-            Text("  登录云创后可收藏到我的书", style = MaterialTheme.typography.labelLarge)
+            Text("  登录云创后可收藏", style = MaterialTheme.typography.labelLarge)
         }
         return
     }
@@ -93,7 +93,7 @@ internal fun CloudFavoriteBar(
         shape = RoundedCornerShape(12.dp),
     ) {
         Icon(Icons.Filled.BookmarkAdded, contentDescription = null, modifier = Modifier.size(18.dp))
-        Text("  收藏到我的书", style = MaterialTheme.typography.labelLarge)
+        Text("  收藏", style = MaterialTheme.typography.labelLarge)
     }
 
     if (sheetOpen) {
@@ -134,9 +134,9 @@ private fun FavoriteSheet(
             modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text("收藏到哪本书", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text("收藏", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Text(
-                "$recipeName · 复制一份到你自己的书，之后才能排进相机槽位",
+                "$recipeName · 复制一份到你的收藏夹，之后才能排进相机槽位",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 8.dp),
@@ -160,7 +160,7 @@ private fun FavoriteSheet(
                 else -> {
                     if (state.books.isEmpty()) {
                         Text(
-                            "账号里还没有书。新建一本即可收藏。",
+                            "还没有收藏夹。新建一个即可收藏。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(vertical = 8.dp),
@@ -186,11 +186,11 @@ private fun FavoriteSheet(
                                 modifier = Modifier.size(18.dp),
                                 tint = MaterialTheme.colorScheme.primary,
                             )
-                            Text("新建书并收藏（NiKConnect）", style = MaterialTheme.typography.bodyLarge)
+                            Text("新建收藏夹并收藏", style = MaterialTheme.typography.bodyLarge)
                         }
                     } else {
                         Text(
-                            "一个账号最多 ${CloudBook.MAX_BOOKS} 本书，先在网页端删一本。",
+                            "一个账号最多 ${CloudBook.MAX_BOOKS} 个收藏夹，先在网页端删一个。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
                             modifier = Modifier.padding(vertical = 8.dp),
@@ -226,7 +226,7 @@ private fun BookRow(book: CloudBook, onClick: () -> Unit) {
         ) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    book.label.ifBlank { "未命名书" },
+                    book.label.ifBlank { "未命名收藏夹" },
                     style = MaterialTheme.typography.bodyLarge,
                     maxLines = 1,
                 )

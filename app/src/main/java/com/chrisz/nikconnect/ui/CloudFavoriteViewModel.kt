@@ -12,11 +12,11 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
- * 「收藏到我的书」的状态。
+ * 「收藏」的状态。
  *
  * 这一层存在的理由：官方 144 个方案不在账号里，只能看到、不能分配；要让它进
  * `IF_FR100_H13` 的可分配池（也就是能排进相机 9 个槽位），必须先
- * `POST /publicrecipe/{guid}` 把它**复制**进自己的一本书。这是本 App 第一处真正改账号数据的操作。
+ * `POST /publicrecipe/{guid}` 把它**复制**进自己的一个收藏夹。这是本 App 第一处真正改账号数据的操作。
  */
 internal data class CloudFavoriteState(
     val books: List<CloudBook> = emptyList(),
@@ -76,7 +76,7 @@ internal class CloudFavoriteViewModel(
     fun favoriteInto(recipeId: String, book: CloudBook) {
         if (recipeId.isBlank() || _state.value.working) return
         if (book.recipeCount >= CloudBook.MAX_RECIPES_PER_BOOK) {
-            _state.update { it.copy(error = "《${book.label}》已满 ${CloudBook.MAX_RECIPES_PER_BOOK} 个方案，换一本或新建。") }
+            _state.update { it.copy(error = "《${book.label}》已满 ${CloudBook.MAX_RECIPES_PER_BOOK} 个方案，换一个收藏夹或新建。") }
             return
         }
         _state.update { it.copy(working = true, error = null) }
@@ -104,7 +104,7 @@ internal class CloudFavoriteViewModel(
     fun createBookAndFavorite(recipeId: String, name: String = DEFAULT_BOOK_NAME) {
         if (recipeId.isBlank() || _state.value.working) return
         if (!_state.value.canCreateBook) {
-            _state.update { it.copy(error = "一个账号最多 ${CloudBook.MAX_BOOKS} 本书，先在网页端删一本。") }
+            _state.update { it.copy(error = "一个账号最多 ${CloudBook.MAX_BOOKS} 个收藏夹，先在网页端删一个。") }
             return
         }
         _state.update { it.copy(working = true, error = null) }
