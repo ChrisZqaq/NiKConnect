@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-- **版本**：0.6.2-alpha（按 2026-11-13 全项目评审报告修 A 批可靠性问题：云创单飞与业务频控退避、断线不再清空云创身份、下载分块级取消、唤醒锁释放、槽位迟到结果保护、WebView 凭据来源白名单、图库翻页保选与筛选内全选、导航常驻、封面缓存预算；JVM 66 项测试通过，真机待验）
+- **版本**：0.6.3-alpha（修 `IF_IR_R_C001` 422 根因：账号 ID 改由账号中心 Keycloak `userinfo` 权威获取，不再从 URL 嗅探 ULID；账号页显示账号 ID 明文；token 失效单独提示；JVM 70 项测试通过，真机待验）
 - **真机基线**：一加 Ace 5 Pro + Nikon Zf
 - **未关闭验证**：0.4 RAW 哈希/分块对照；0.5 遗留三项（在线刷新频控、详情参数与官网逐项对照、蜂窝网络封面流量）；0.6 相机列表与槽位接口的响应形状（真机未验，解析按特征嗅探 + 原始响应可截图）；0.6 批次 2（拖拽排布、收藏到书）未开工
 
@@ -320,6 +320,24 @@
 - 删除 `np3/` 与 B0 探针：**用户 2026-11-13 决定保留不动**——当前零业务调用、零运行时开销、测试全绿，作为研究资产留仓，等 PTP 槽位探针真机跑通后再决定是否进 UI。
 - 事务级累计上限、START_DATA 阶段顺序校验：需要先补协议层测试夹具，否则改协议代码没有验证手段。
 - 分页句柄快照：现有 offset 分页在"传输中相机新增文件"下可能重复，但改成快照要引入失效时机（刷新/重连/拍摄完成），本批不引入新状态。
+
+## 2026-11-13 · 0.6.3：账号 ID 改走 Keycloak userinfo（422 根因）
+
+真机连续两轮报 `IF_IR_R_C001 HTTP 422`，`重新获取账号 ID` 也无效。回到 Web 端 chunk 找「guid 到底从哪来」：
+
+- `_app-6f8f948013527c4a.js` 的登录初始化里是这么写的：
+  `let e = await keycloak.loadUserInfo(); ... let D = { authenticated: I, guid: e.guid, accessToken: keycloak.token, languageCode: e.languageCode, countryCode: e.countryCode }`
+  即 **guid 是 OIDC userinfo 的返回字段**，不是从任何 URL 里解析出来的。
+- 配置来源 `https://imagingcloud.nikon.com.cn/json/keycloak_Prod.json`：`realm=user`、`auth-server-url=https://auth.accounts.cld.nikon.com.cn/auth`、`resource=c0004`。
+  → userinfo = `GET https://auth.accounts.cld.nikon.com.cn/auth/realms/user/protocol/openid-connect/userinfo`，仅需 `Authorization: Bearer <token>`。
+- 旁证（无 token 探测，`Authorization: Bearer faketoken`）：`/camera/0000000000000001/` → 401、`/camera/xyz/` → 401、`/camera/01HXDNNTHY1AZ6RVMMXSXY3BTK/` → **422**。只有 26 位 ULID 形态才穿过网关进到业务校验层 → 之前「从 URL 嗅探第一个 ULID」很容易拿到方案 ID／bookId，形态合法但账号不对，服务端只能回 422。这也解释了为什么「重新获取账号 ID」没用：重抓的仍然是同一批 ULID。
+
+修法：
+- `cloud/CloudHttp.kt` 新增 `AUTH_HOST = "https://auth.accounts.cld.nikon.com.cn/auth/realms/user"`。
+- `cloud/CloudAccountClient.kt` 新增 `CloudIdentity(guid, language, country, subject)` 与 `suspend fun fetchIdentity()`（`GET $AUTH_HOST/protocol/openid-connect/userinfo`，callId `OIDC_USERINFO`），解析 `parseIdentity()`：优先 `guid`/`userGuid`/`user_guid`/`userId`/`user_id`，再退回「形态合法的 sub」；都没有就抛错并带原始片段——**不再猜**。
+- `ui/CloudAccountViewModel.refreshCameras()` 改成两步：先 userinfo 拿权威 guid；401/403 直接判定「登录态已失效，退出重登」（不再拿错 guid 撞 422）；拿到 guid 就用它查相机，候选嗅探降级为最后退路。
+- `ui/CloudAccountScreen.kt` 新增 `GuidLine`（账号 ID 明文一行，可选中复制），出问题时用户能直接读值反馈；`GuidRefreshBar` 文案改「服务端不认这个账号 ID」+「退出重登」。
+- 测试：`CloudAccountClientTest` 新增 4 项（guid 声明、sub 兜底、无 guid 抛错、非对象抛错）。JVM 70 项全绿。
 
 ## 开放问题
 

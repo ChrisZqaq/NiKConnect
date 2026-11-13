@@ -56,17 +56,58 @@ internal class CloudAccountViewModel(
         refreshCameras()
     }
 
+    /**
+     * 先向账号中心（Keycloak userinfo）问「我是谁」，再拿这个 guid 去查相机。
+     *
+     * 0.6.0/0.6.1 的 422 根因就在这：Web 端的 guid 不是从 URL 里猜出来的，而是
+     * `keycloak.loadUserInfo()` 返回的 `guid`。从 URL 嗅探 ULID 会抓到方案 ID／bookId，
+     * 带错 guid 请求 `IF_IR_R_C001` 时网关返回 422。
+     */
     fun refreshCameras() {
-        val candidates = guidCandidates(accessToken, workingGuid ?: _state.value.guid)
-        if (candidates.isEmpty()) {
-            _state.update {
-                it.copy(cameraError = "没有拿到账号 guid（登录后自动捕获）。点右上角刷新，或用「重新获取账号 ID」在网页里打开相机页。", needsGuidRefresh = true)
-            }
-            return
-        }
         if (_state.value.loadingCameras) return
         _state.update { it.copy(loadingCameras = true, cameraError = null, rawSnippet = null) }
         viewModelScope.launch {
+            val probe = CloudAccountClient(accessToken = accessToken, guid = _state.value.guid.orEmpty())
+            var resolved: String? = null
+            var identityError: CloudException? = null
+            try {
+                resolved = probe.fetchIdentity().guid
+            } catch (e: CloudException) {
+                identityError = e
+            }
+
+            // token 失效是确定性结论，别再拿错 guid 去撞 422 把用户绕晕
+            if (resolved == null && identityError?.httpStatus in setOf(401, 403)) {
+                _state.update {
+                    it.copy(
+                        loadingCameras = false,
+                        cameraError = "登录态已失效（HTTP ${identityError?.httpStatus}）。点右上角退出后重新登录云创。",
+                        rawSnippet = identityError?.message,
+                        needsGuidRefresh = false,
+                    )
+                }
+                return@launch
+            }
+
+            val candidates = if (resolved != null) {
+                listOf(resolved)
+            } else {
+                guidCandidates(accessToken, workingGuid ?: _state.value.guid)
+            }
+            if (candidates.isEmpty()) {
+                _state.update {
+                    it.copy(
+                        guid = resolved,
+                        loadingCameras = false,
+                        cameraError = identityError?.message
+                            ?: "没有拿到账号 ID。点右上角退出后重新登录云创。",
+                        rawSnippet = identityError?.message,
+                        needsGuidRefresh = true,
+                    )
+                }
+                return@launch
+            }
+
             var lastError: CloudException? = null
             for (guid in candidates) {
                 val client = CloudAccountClient(accessToken = accessToken, guid = guid)
@@ -83,6 +124,7 @@ internal class CloudAccountViewModel(
                             } else {
                                 null
                             },
+                            rawSnippet = identityError?.message,
                             needsGuidRefresh = false,
                         )
                     }
@@ -90,29 +132,17 @@ internal class CloudAccountViewModel(
                     return@launch
                 } catch (e: CloudException) {
                     lastError = e
-                    // 只有「guid 不被接受」这一类才值得换下一个候选；频控/网络问题换 guid 也没用
-                    if (e.httpStatus !in GUID_REJECTED_CODES && e.errorCode.isNotBlank()) break
                 }
             }
-            val error = lastError ?: return@launch
             _state.update {
                 it.copy(
+                    guid = resolved ?: it.guid,
                     loadingCameras = false,
-                    cameraError = describe(error, "IF_IR_R_C001"),
-                    rawSnippet = error.message,
-                    needsGuidRefresh = error.httpStatus in GUID_REJECTED_CODES,
+                    cameraError = describe(lastError, "IF_IR_R_C001"),
+                    rawSnippet = lastError?.message,
+                    needsGuidRefresh = lastError?.httpStatus in GUID_REJECTED_CODES,
                 )
             }
-        }
-    }
-
-    /** 可分配方案数量：失败不影响相机列表展示。 */
-    private suspend fun loadAssignableCount(client: CloudAccountClient) {
-        try {
-            val assignable = client.assignableRecipes()
-            _state.update { it.copy(assignableCount = assignable.size) }
-        } catch (e: CloudException) {
-            _state.update { it.copy(assignableCount = null) }
         }
     }
 
@@ -164,10 +194,19 @@ internal class CloudAccountViewModel(
         _state.update { it.copy(selected = null, slots = emptyList(), slotsError = null, loadingSlots = false) }
     }
 
-    private fun describe(e: CloudException, callId: String): String = when {
+    private fun loadAssignableCount(client: CloudAccountClient) {
+        viewModelScope.launch {
+            runCatching { client.assignableRecipes().size }
+                .onSuccess { count -> _state.update { it.copy(assignableCount = count) } }
+        }
+    }
+
+    private fun describe(e: CloudException?, callId: String): String = if (e == null) {
+        "$callId 未执行"
+    } else when {
         e.errorCode.isNotBlank() -> "$callId 返回 ${e.errorCode}"
         e.httpStatus == 401 || e.httpStatus == 403 -> "$callId 认证失败（${e.httpStatus}）：token 可能已过期，重新登录一次"
-        e.httpStatus == 422 -> "$callId 拒绝了这个账号 ID（422）。点「重新获取账号 ID」，在网页里打开相机页会自动抓到正确的值。"
+        e.httpStatus == 422 -> "$callId 不认这个账号 ID（422）。已在账号中心取过权威值，若仍报错说明 token 与账号不匹配，退出重登一次。"
         else -> e.message.orEmpty()
     }
 

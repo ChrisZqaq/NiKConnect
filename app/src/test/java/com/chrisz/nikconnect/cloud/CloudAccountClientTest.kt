@@ -128,4 +128,35 @@ class CloudAccountClientTest {
             assertTrue(e.message!!.contains("不是合法 JSON"))
         }
     }
+
+    // ---- 账号身份（Keycloak userinfo） ----
+
+    @Test
+    fun `identity takes guid claim`() {
+        val raw = """{"sub":"a0b1","guid":"01HXDNNTHY1AZ6RVMMXSXY3BTK","languageCode":"zh-cn","countryCode":"CN"}"""
+        val identity = client().parseIdentity(raw)
+        assertEquals("01HXDNNTHY1AZ6RVMMXSXY3BTK", identity.guid)
+        assertEquals("zh-cn", identity.language)
+        assertEquals("CN", identity.country)
+    }
+
+    @Test
+    fun `identity falls back to guid shaped sub`() {
+        val raw = """{"sub":"01JD7Z5Q9W3T6K2M4N8P0R5SYV"}"""
+        assertEquals("01JD7Z5Q9W3T6K2M4N8P0R5SYV", client().parseIdentity(raw).guid)
+    }
+
+    @Test
+    fun `identity without guid is an error`() {
+        // 回归：以前允许「猜」出账号 ID，于是把方案 ID/bookId 当账号 ID 去请求，服务端回 422
+        val e = assertThrows(CloudException::class.java) {
+            client().parseIdentity("""{"sub":"not-a-guid","preferred_username":"abc"}""")
+        }
+        assertTrue(e.message.orEmpty().contains("没有账号 ID"))
+    }
+
+    @Test
+    fun `identity rejects non object`() {
+        assertThrows(CloudException::class.java) { client().parseIdentity("""[{"guid":"01JD7Z5Q9W3T6K2M4N8P0R5SYV"}]""") }
+    }
 }

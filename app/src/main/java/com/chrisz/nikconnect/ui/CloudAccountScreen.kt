@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -90,15 +91,41 @@ internal fun CloudAccountScreen(
             }
         }
 
+        state.guid?.takeIf { it.isNotBlank() }?.let { GuidLine(it) }
         if (state.needsGuidRefresh) {
             GuidRefreshBar(onRecaptureGuid)
         }
         if (!state.hasCredentials) {
-            Notice("没有拿到账号 guid。点上面「重新获取账号 ID」，在网页里打开相机页即可自动捕获。")
+            Notice("没有拿到账号 ID。点右上角刷新重试；仍然失败就退出后重新登录云创。")
         } else if (state.selected == null) {
             CameraSection(state = state, onOpen = model::openCamera, onLogout = onLogout)
         } else {
             SlotSection(state = state, onRetry = { model.openCamera(state.selected!!) })
+        }
+    }
+}
+
+/** 账号 ID 明文一行：出问题时用户能直接读出来反馈，不用去装抓包工具。 */
+@Composable
+private fun GuidLine(guid: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "账号 ID",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.width(8.dp))
+        SelectionContainer {
+            Text(
+                guid,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -112,13 +139,13 @@ private fun GuidRefreshBar(onRecaptureGuid: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            "账号 ID 可能不对（把方案 ID 当成了账号 ID）",
+            "服务端不认这个账号 ID",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.error,
             modifier = Modifier.weight(1f),
         )
         TextButton(onClick = onRecaptureGuid, modifier = Modifier.heightIn(min = 48.dp)) {
-            Text("重新获取账号 ID")
+            Text("退出重登")
         }
     }
 }

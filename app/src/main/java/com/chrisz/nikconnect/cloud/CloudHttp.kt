@@ -12,6 +12,13 @@ import java.net.URL
 
 /** 云创主机：目录与「可分配方案」在 cwp 主机，账号/相机/详情在 ir 主机。两者不能混用（混用返回 E01_9998）。 */
 internal const val CWP_HOST = "https://api.user.cwp.imagingcloud.nikon.com.cn"
+/**
+ * 账号中心（Keycloak realm=user，resource c0004）。值取自
+ * `https://imagingcloud.nikon.com.cn/json/keycloak_Prod.json`。
+ * `userinfo` 是**账号 ID 的唯一权威来源**：Web 端也用它拿 `guid`。
+ */
+internal const val AUTH_HOST = "https://auth.accounts.cld.nikon.com.cn/auth/realms/user"
+
 internal const val IR_HOST = "https://api.user.ir.imagingcloud.nikon.com.cn"
 internal const val CLOUD_ORIGIN = "https://imagingcloud.nikon.com.cn"
 /** 云创网页入口（方案库首页）。 */

@@ -27,6 +27,14 @@ internal data class CloudSlot(
     val occupied: Boolean get() = !recipeId.isNullOrBlank() || name.isNotBlank()
 }
 
+/** 账号中心（Keycloak userinfo）返回的身份信息：账号 ID 的唯一权威来源。 */
+internal data class CloudIdentity(
+    val guid: String,
+    val language: String = "",
+    val country: String = "",
+    val subject: String = "",
+)
+
 /**
  * 云创账号侧接口（需要 access_token + 账号 guid）——批次 1 只读。
  *
@@ -44,6 +52,17 @@ internal class CloudAccountClient(
     private val http: CloudHttp = CloudHttp.shared,
 ) {
     private val bearer = mapOf("Authorization" to "Bearer $accessToken")
+
+    /**
+     * 取账号身份。
+     *
+     * 这是 Web 端拿 `guid` 的原路径（`_app` chunk：`keycloak.loadUserInfo()` 之后
+     * `guid = e.guid`），比从请求 URL 里猜 ULID 可靠得多——账号页 422 的根因就是猜。
+     */
+    suspend fun fetchIdentity(): CloudIdentity = withContext(Dispatchers.IO) {
+        val raw = http.get("$AUTH_HOST/protocol/openid-connect/userinfo", bearer, "OIDC_USERINFO")
+        parseIdentity(raw)
+    }
 
     suspend fun listCameras(): List<CloudCamera> = withContext(Dispatchers.IO) {
         val raw = http.get("$IR_HOST/camera/$guid/", bearer, "IF_IR_R_C001")
@@ -130,6 +149,24 @@ internal class CloudAccountClient(
      * 1) 响应本身就是空数组/空列表 → 真的没有数据，返回空；
      * 2) 其它形状 → 结构变了或解析规则不对，抛错并带原始片段，别把「不认识」说成「账号是空的」。
      */
+    fun parseIdentity(raw: String): CloudIdentity {
+        val element = http.parseElement(raw, "OIDC_USERINFO")
+        val o = element as? JsonObject
+            ?: throw CloudException("OIDC_USERINFO 返回的不是对象：${raw.take(160)}", httpStatus = -2)
+        val guid = firstNonBlank(o, "guid", "userGuid", "user_guid", "userId", "user_id")
+            ?: o.str("sub")?.takeIf { isGuidLike(it) }
+            ?: throw CloudException(
+                "账号信息里没有账号 ID（guid）：${raw.take(200)}",
+                httpStatus = -2,
+            )
+        return CloudIdentity(
+            guid = guid,
+            language = firstNonBlank(o, "languageCode", "locale", "preferred_username").orEmpty(),
+            country = firstNonBlank(o, "countryCode", "country", "zoneinfo").orEmpty(),
+            subject = o.str("sub").orEmpty(),
+        )
+    }
+
     private fun emptyArrayOrFail(
         element: JsonElement,
         raw: String,
