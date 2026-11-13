@@ -27,6 +27,9 @@ internal interface CloudAccountApi {
 
     suspend fun deleteSlot(cameraId: String, recipeId: String): String
 
+    /** 把账号里的方案加进「相机可分配池」（IF_IR_R_C003）。 */
+    suspend fun addRecipes(cameraId: String, recipeIds: List<String>): String
+
     /** 用 refresh_token 换新 access_token；换不到返回 null。 */
     suspend fun refreshAccessToken(refreshToken: String): Pair<String, String?>?
 }

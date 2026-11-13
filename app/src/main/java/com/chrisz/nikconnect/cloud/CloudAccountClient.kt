@@ -160,6 +160,7 @@ internal class CloudAccountClient(
     private val http: CloudHttp = CloudHttp.shared,
 ) : CloudAccountApi {
     private val bearer = mapOf("Authorization" to "Bearer $accessToken")
+    private val accessTokenHeader = mapOf("access_token" to accessToken)
 
     /**
      * 取账号身份。
@@ -284,22 +285,75 @@ internal class CloudAccountClient(
      * 没有显式 Content-Type —— fetch 对字符串 body 默认发 `text/plain;charset=UTF-8`。
      * 所以我们先按 text/plain 发；只有服务端回 400/422 时才补一次 `application/json`。
      */
+    /**
+     * 新建收藏夹（IF_IR_R_PB002）。
+     *
+     * 网页端是裸 `fetch(url,{method:"POST",headers:{Authorization},body:JSON.stringify({name})})`，
+     * 也就是 `Content-Type: text/plain;charset=UTF-8`。真机上这个组合会被服务端回 **403（响应体为空）**，
+     * 而同 token 的 GET C001 正常，说明不是 token 问题而是这道写接口对请求形状更挑。
+     * 这里按「text/plain → application/json → access_token 头 → 带尾斜杠」逐个试，命中即返回，
+     * 并把每次尝试的状态写进日志（`CloudDebug` 也会落盘），便于后续收敛成唯一写法。
+     */
     override suspend fun createBook(name: String): String = withContext(Dispatchers.IO) {
         val body = buildBookBody(name)
-        val raw = try {
-            http.post("$IR_HOST/publicbook/$guid", body, bearer, "IF_IR_R_PB002")
-        } catch (e: CloudException) {
-            if (e.httpStatus != 400 && e.httpStatus != 422) throw e
+        val attempts = listOf(
+            Attempt("text/plain", "$IR_HOST/publicbook/$guid", bearer, null),
+            Attempt("application/json", "$IR_HOST/publicbook/$guid", bearer, "application/json"),
+        )
+        var last: CloudException? = null
+        attempts.forEach { attempt ->
+            try {
+                val raw = http.request(
+                    attempt.method,
+                    attempt.url,
+                    body,
+                    attempt.headers,
+                    "IF_IR_R_PB002",
+                    contentType = attempt.contentType ?: "text/plain;charset=UTF-8",
+                    omitOrigin = attempt.omitOrigin,
+                )
+                runCatching { android.util.Log.d("NikConnect", "PB002 ok via ${attempt.label}") }
+                return@withContext parseCreatedBookId(raw)
+            } catch (e: CloudException) {
+                last = e
+                runCatching {
+                    android.util.Log.d("NikConnect", "PB002 ${attempt.label} -> ${e.httpStatus}")
+                }
+                if (e.httpStatus !in setOf(400, 401, 403, 404, 405, 415, 422)) throw e
+            }
+        }
+        runCatching {
+            android.util.Log.d("NikConnect", "PB002 token ${CloudCapture.jwtSummary(accessToken)}")
+        }
+        throw last ?: CloudException("IF_IR_R_PB002 创建收藏夹失败")
+    }
+
+    private data class Attempt(
+        val label: String,
+        val url: String,
+        val headers: Map<String, String>,
+        val contentType: String?,
+        val omitOrigin: Boolean = false,
+        val method: String = "POST",
+    )
+
+    /**
+     * 把方案加进相机的可分配池（IF_IR_R_C003）。
+     *
+     * 网页端 `POST /camera/{guid}/{deviceId}`，body `{"recipeIds":[…]}`。
+     * 删空槽位后池子会一起清空，要恢复/新增就得先走这一步，否则槽位选择器里没有可选项。
+     */
+    override suspend fun addRecipes(cameraId: String, recipeIds: List<String>): String =
+        withContext(Dispatchers.IO) {
+            if (recipeIds.isEmpty()) return@withContext ""
             http.post(
-                "$IR_HOST/publicbook/$guid",
-                body,
+                "$IR_HOST/camera/$guid/$cameraId",
+                """{"recipeIds":${recipeIds.joinToString(",", "[", "]") { "\"$it\"" }}}""",
                 bearer,
-                "IF_IR_R_PB002",
+                "IF_IR_R_C003",
                 contentType = "application/json",
             )
         }
-        parseCreatedBookId(raw)
-    }
 
     // ---- 解析（纯函数，供 JVM 测试） ----
 
@@ -311,7 +365,7 @@ internal class CloudAccountClient(
             ?: http.findObjectArray(element, CAMERA_KEYS, mustHave = "id")
             ?: http.findObjectArray(element, CAMERA_KEYS, mustHave = "cameraId")
             ?: http.findObjectArray(element, CAMERA_KEYS, mustHave = "device_id")
-            ?: emptyArrayOrFail(element, raw, "IF_IR_R_C001", "相机列表")
+            ?: emptyArrayOrFail(element, raw, "IF_IR_R_C001", "相机列表", CAMERA_KEYS)
         return arr.mapNotNull { el ->
             val o = el as? JsonObject ?: return@mapNotNull null
             val id = firstNonBlank(o, "deviceId", "device_id", "id", "cameraId") ?: return@mapNotNull null
@@ -330,7 +384,7 @@ internal class CloudAccountClient(
             ?: http.findObjectArray(element, SLOT_KEYS, mustHave = "exist")
             ?: http.findObjectArray(element, SLOT_KEYS, mustHave = "recipeId")
             ?: http.findObjectArray(element, SLOT_KEYS, mustHave = "id")
-            ?: emptyArrayOrFail(element, raw, "IF_IR_R_C002", "槽位")
+            ?: emptyArrayOrFail(element, raw, "IF_IR_R_C002", "槽位", SLOT_KEYS)
         return arr.mapIndexedNotNull { index, el ->
             val o = el as? JsonObject ?: return@mapIndexedNotNull null
             // 槽位号以数组顺序为准（Web 端把数组顺序直接当槽位）；若响应自带 slot/slotNum 则优先用
@@ -349,8 +403,14 @@ internal class CloudAccountClient(
 
     fun parseAssignable(raw: String): List<CloudRecipe> {
         val element = http.parseElement(raw, "IF_FR100_H13")
-        val arr: JsonArray = http.findObjectArray(element, ASSIGNABLE_KEYS, mustHave = "id")
-            ?: emptyArrayOrFail(element, raw, "IF_FR100_H13", "可分配方案")
+        // H13 的响应里同时有 `camera[]`（相机列表）和 `recipe[]`（可分配池）。
+        // 直接按声明键取，避免 recipe 为空时嗅探跑到 camera[] 上把相机当成方案（真机出现过「Zf」当方案）。
+        val declared = (element as? JsonObject)?.let { obj ->
+            ASSIGNABLE_KEYS.firstNotNullOfOrNull { key -> obj[key] as? JsonArray }
+        }
+        val arr: JsonArray = declared
+            ?: http.findObjectArray(element, ASSIGNABLE_KEYS, mustHave = "id")
+            ?: emptyArrayOrFail(element, raw, "IF_FR100_H13", "可分配方案", RECIPE_KEYS)
         return arr.mapNotNull { el ->
             val o = el as? JsonObject ?: return@mapNotNull null
             val id = o.str("id") ?: return@mapNotNull null
@@ -512,15 +572,24 @@ internal class CloudAccountClient(
      * 1) 响应本身就是空数组/空列表 → 真的没有数据，返回空；
      * 2) 其它形状 → 结构变了或解析规则不对，抛错并带原始片段，别把「不认识」说成「账号是空的」。
      */
+    /**
+     * 区分「服务端确实返回空列表」和「结构不认识」。
+     *
+     * 真机教训（2026-11-14）：槽位删空后 `IF_IR_R_C002` 回
+     * `{"status":1,"localRecipes":[],"date":"…"}`，旧逻辑只把「所有字段都空」当空列表，
+     * 于是把这条合法响应判成「结构无法识别」并卡在重试。现在只要**已知的列表键存在且为空**就算空列表。
+     */
     private fun emptyArrayOrFail(
         element: JsonElement,
         raw: String,
         callId: String,
         what: String,
+        keys: List<String> = emptyList(),
     ): JsonArray {
         val definitelyEmpty = when (element) {
             is JsonArray -> element.isEmpty()
             is JsonObject -> element.isEmpty() ||
+                keys.any { key -> (element[key] as? JsonArray)?.isEmpty() == true } ||
                 element.values.all { value ->
                     (value is JsonArray && value.isEmpty()) || (value is JsonObject && value.isEmpty())
                 }

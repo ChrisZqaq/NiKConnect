@@ -56,6 +56,22 @@ class CloudAccountClientTest {
     }
 
     @Test
+    fun `empty assignable pool is empty even though cameras are present`() {
+        val client = CloudAccountClient(accessToken = "t", guid = "0000000000062160")
+        // 真机原始响应：删空槽位后 recipe 为空，但 camera[] 还在（旧逻辑会把相机当方案）
+        val raw = """{"authority":0,"recipe":[],"camera":[{"id":"1","deviceId":"01JTC8JS","name":"Zf","recipeIds":[null]}]}"""
+        assertTrue(client.parseAssignable(raw).isEmpty())
+    }
+
+    @Test
+    fun `empty slot list with other fields counts as empty not unrecognised`() {
+        val client = CloudAccountClient(accessToken = "t", guid = "0000000000062160")
+        // 真机原始响应：槽位删空后服务端就是这么回的，旧逻辑会把它判成「结构无法识别」
+        val raw = """{"status":1,"localRecipes":[],"date":"2026-11-13T14:31:38+08:00"}"""
+        assertTrue(client.parseSlots(raw).isEmpty())
+    }
+
+    @Test
     fun `unknown shape is an error not an empty account`() {
         // 回归：以前把「结构不认识」当成「账号下没有相机」，用户看到的是错误的空态
         val e = assertThrows(CloudException::class.java) {

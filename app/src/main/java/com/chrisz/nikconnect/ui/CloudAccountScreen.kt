@@ -63,6 +63,7 @@ import kotlin.math.roundToInt
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.chrisz.nikconnect.cloud.CloudSlot
 import com.chrisz.nikconnect.cloud.CloudRecipe
+import com.chrisz.nikconnect.cloud.OwnedRecipe
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -190,6 +191,7 @@ internal fun CloudAccountScreen(
                 position = position,
                 state = state,
                 onPick = { recipe -> model.fillSlot(position, recipe) },
+                onPickFromLibrary = { recipe -> model.fillSlotFromLibrary(position, recipe) },
                 onRetry = { model.loadAssignable() },
                 onDismiss = model::dismissSlotPicker,
             )
@@ -672,6 +674,7 @@ private fun SlotPicker(
     position: Int,
     state: CloudAccountState,
     onPick: (CloudRecipe) -> Unit,
+    onPickFromLibrary: (OwnedRecipe) -> Unit,
     onRetry: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -701,13 +704,39 @@ private fun SlotPicker(
             } else if (state.assignable.isEmpty()) {
                 Text(
                     state.assignableError
-                        ?: "可分配池是空的。先在云创网页把方案收藏到你的书，再回来这里挑选。",
+                        ?: "可分配池是空的。删空槽位后相机会把池子一起清掉，可以从下面账号里的方案直接加回来。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                val library = state.library?.recipes.orEmpty()
+                if (library.isNotEmpty()) {
+                    Text(
+                        "账号里的方案（${library.size} 个）· 点一下即加入相机并放到第 ${position + 1} 位",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 320.dp)) {
+                        items(library, key = { it.id }) { recipe ->
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onPickFromLibrary(recipe) }
+                                    .padding(vertical = 12.dp),
+                            ) {
+                                Text(recipe.name, style = MaterialTheme.typography.bodyMedium)
+                                if (recipe.pictureControlName.isNotBlank()) {
+                                    Text(
+                                        recipe.pictureControlName,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+                        }
+                    }
+                }
                 state.rawSnippet?.let { RawSnippet(it) }
-
-        LibrarySection(state)
                 TextButton(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) { Text("重新读取") }
             } else {
                 LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp)) {

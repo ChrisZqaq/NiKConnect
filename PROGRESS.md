@@ -589,6 +589,31 @@ App 自然永远抓不到 token。
 
 真机：交互模式已把 Keycloak 的「短信验证码登录」页拉起来（短信确实到了），**验证码由用户本人输入**，之后应自动回 App。
 
+## 2026-11-14 · 0.7.1：续期修好 + 槽位池可恢复
+
+**真机链路（adb 无线调试，全程我自己点/截图/抓日志）**
+- 登录后 `OIDC_USERINFO 200 → C001 200 → H13 200 → H05 200`；槽位页 1..9 全部渲染。
+- `IF_IR_R_C004 PATCH … {"recipes":[{"slotNo":1,"recipeId":"01JTC8RSS6…"}]} → 200`，随后 `C002 → order:1`；重进 App 后仍是第 1 位 —— 写回在服务端真落地。
+- `IF_IR_R_C005 DELETE …/01JTC8RSS6… → 200`，紧跟 `C002 → {"localRecipes":[]}` —— 全清空走 DELETE 而不是空数组 PATCH。
+
+**修掉的三个真 bug**
+1. `OIDC_REFRESH` 一直 415（`RESTEASY003065: Cannot consume content type`）：`send()` 用默认 `text/plain` 覆盖了 header 里的 `application/x-www-form-urlencoded`。改成把 contentType 作为参数传，refresh 立刻 200 并换到新 token —— **access_token 过期不再需要重新登录**。
+2. 槽位删空后 `C002` 回 `{"status":1,"localRecipes":[],"date":…}`，被 `emptyArrayOrFail` 判成「结构无法识别」并卡在重试。现在「已知列表键存在且为空」即视为空列表（`emptyArrayOrFail(..., keys)`）。
+3. `H13` 的 `recipe: []` 为空时嗅探会跑到 `camera[]` 上，把相机 `Zf` 当成可分配方案。改为优先取声明键（`recipe`），空就是空。
+
+**新增能力：槽位池可恢复（`IF_IR_R_C003`）**
+- `cloud/CloudAccountClient.kt` 新增 `addRecipes(cameraId, recipeIds)` = `POST /camera/{guid}/{deviceId}` body `{"recipeIds":[…]}`，真机 `201`。
+- 删空槽位会连「可分配池」一起清空（`H13 recipe: []`），此时槽位选择器没有可选项。现在选择器空态会列出**账号里的方案**（`H05 localRecipes`，真机 16 个），点一下即 `C003` 加回相机池并落到该槽位，再「保存到相机」写排布。
+- 真机复现并恢复：删掉唯一槽位 → 池子空 → 从「账号里的方案」把 `Vitality Film by Peng Mango` 加回 → ↓↓ 移到第 3 位 → `PATCH slotNo:3 → 200`，回到原始状态。
+
+**仍卡着：`IF_IR_R_PB002` 建收藏夹 403**（响应体为空）
+- 试过 7 种形状：`text/plain`、`application/json`、`access_token` 头（→401）、带尾斜杠、去掉 Origin、`PUT`（→ 网关 SigV4 报错，说明该路由只注册了 POST）。
+- 同 token 的 `C001`/`C002`/`C004`/`C005`/`H05`/`H13` 全部 200，`userinfo` 200；JWT 里 `resource_access` 为空、`scope=openid profile email`。
+- 结论未定：可能是账号侧权限（`H05` 里 `nis:0 / authority:0`，且 `books: []`），也可能另有要求的请求头。下一步用 WebView 页面上下文发同一请求来分辨「服务端权限」还是「我们的请求形状」。
+
+验证：126 项 JVM 测试 0 失败（新增 3 项：空槽位响应、空可分配池、PB002 形状记录）；`lintDebug` 0 error / 6 warning（既有项）。
+
+
 ## 开放问题
 
 1. 真实图库规模（120 / 300 / 更大）→ 决定 0.2 分页与批量元数据优先级。

@@ -235,6 +235,7 @@ fun CloudLoginScreen(
                 com.chrisz.nikconnect.cloud.parseIdentityForLogin(body)
             }.getOrNull()
             runCatching { android.util.Log.d("NikConnect", "oidc ok guid=${guid?.takeLast(6)}") }
+            runCatching { android.util.Log.d("NikConnect", "our-token ${CloudCapture.jwtSummary(access)}") }
             webView?.post { finishWith(access, guid, refresh) }
         }
     }
@@ -248,6 +249,7 @@ fun CloudLoginScreen(
         if (t.length <= 40 || capturedToken.isNotEmpty()) return
         capturedToken = t
         runCatching { android.util.Log.d("NikConnect", "token captured: ${t.take(12)}…") }
+        runCatching { android.util.Log.d("NikConnect", "spa-token ${CloudCapture.jwtSummary(t)}") }
         // 顺手把 keycloak 的 refresh_token 读出来：拿不到就照旧返回（只是少了自动续期）
         webView?.evaluateJavascript(REFRESH_PROBE_JS) { raw ->
             val refresh = raw?.trim()?.trim('"')?.takeIf { it.length > 20 && it != "null" }
@@ -307,6 +309,15 @@ fun CloudLoginScreen(
                     settings.javaScriptEnabled = true
                     // 允许 chrome://inspect 连上这个 WebView：登录流程出问题时能直接看控制台
                     WebView.setWebContentsDebuggingEnabled(true)
+                    // 把页面 console 转进 logcat：调试构建里用来观察页面上下文发起的请求结果
+                    webChromeClient = object : android.webkit.WebChromeClient() {
+                        override fun onConsoleMessage(msg: android.webkit.ConsoleMessage): Boolean {
+                            runCatching {
+                                android.util.Log.d("NikConnect", "console ${msg.message()}")
+                            }
+                            return true
+                        }
+                    }
                     // 登录要跨 accounts.cld.nikon.com.cn ↔ imagingcloud.nikon.com.cn 两个域，
                     // 不放第三方 cookie 时 SSO 会"转一圈回到落地页"，看起来就是点登录没反应。
                     android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)

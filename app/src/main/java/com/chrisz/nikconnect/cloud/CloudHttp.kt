@@ -94,12 +94,13 @@ internal class CloudHttp(
         headers: Map<String, String>,
         callId: String,
         contentType: String = "text/plain;charset=UTF-8",
+        omitOrigin: Boolean = false,
     ): String {
         var attempt = 0
         while (true) {
             attempt++
             try {
-                val raw = send(method, url, body, headers, callId, contentType)
+                val raw = send(method, url, body, headers, callId, contentType, omitOrigin)
                 val code = businessErrorCode(raw)
                 if (code.isNotBlank()) throw CloudException("$callId 返回错误码 $code", errorCode = code)
                 return raw
@@ -128,6 +129,7 @@ internal class CloudHttp(
         headers: Map<String, String>,
         callId: String,
         contentType: String = "text/plain;charset=UTF-8",
+        omitOrigin: Boolean = false,
     ): String {
         // gate 覆盖「等间隔 + 发请求 + 读响应」全过程：慢请求不会与后续请求重叠（进程内单飞）。
         gate.withLock {
@@ -140,8 +142,10 @@ internal class CloudHttp(
                 conn.connectTimeout = 15_000
                 conn.readTimeout = 25_000
                 conn.setRequestProperty("User-Agent", CLOUD_USER_AGENT)
-                conn.setRequestProperty("Origin", CLOUD_ORIGIN)
-                conn.setRequestProperty("Referer", "$CLOUD_ORIGIN/")
+                if (!omitOrigin) {
+                    conn.setRequestProperty("Origin", CLOUD_ORIGIN)
+                    conn.setRequestProperty("Referer", "$CLOUD_ORIGIN/")
+                }
                 conn.setRequestProperty("Accept", "application/json, text/plain, */*")
                 headers.forEach { (k, v) -> conn.setRequestProperty(k, v) }
                 if (body != null) {
@@ -213,8 +217,9 @@ internal class CloudHttp(
                 "POST",
                 "$AUTH_HOST/protocol/openid-connect/token",
                 form,
-                mapOf("Content-Type" to "application/x-www-form-urlencoded"),
+                emptyMap(),
                 "OIDC_REFRESH",
+                contentType = "application/x-www-form-urlencoded",
             )
         }.getOrNull() ?: return null
         return parseTokenResponse(raw)

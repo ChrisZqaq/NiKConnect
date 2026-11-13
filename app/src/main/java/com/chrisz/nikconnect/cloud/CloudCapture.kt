@@ -39,6 +39,36 @@ internal object CloudCapture {
             .firstOrNull()
     }
 
+    /**
+     * JWT 载荷摘要（**不含 token 本身**），用于诊断"同一账号读接口能过、写接口 403"这类权限差异。
+     * 只输出 claim 名、scope、aud、resource_access 里的客户端与角色名。
+     */
+    fun jwtSummary(token: String?): String {
+        val payload = token?.split('.')?.getOrNull(1)?.takeIf { it.isNotBlank() } ?: return "no-token"
+        val decoded = runCatching {
+            String(
+                java.util.Base64.getUrlDecoder().decode(payload),
+                Charsets.UTF_8,
+            )
+        }.getOrNull() ?: return "undecodable"
+        val obj = runCatching { org.json.JSONObject(decoded) }.getOrNull() ?: return "not-json"
+        val keys = obj.keys().asSequence().toList().sorted()
+        val scope = obj.optString("scope", "")
+        val aud = obj.opt("aud")?.toString().orEmpty()
+        val resource = obj.optJSONObject("resource_access")?.let { ra ->
+            ra.keys().asSequence().sorted().joinToString(";") { client ->
+                val roles = ra.optJSONObject(client)?.optJSONArray("roles")?.let { arr ->
+                    (0 until arr.length()).joinToString(",") { arr.optString(it) }
+                }.orEmpty()
+                "$client:$roles"
+            }
+        }.orEmpty()
+        val realmRoles = obj.optJSONObject("realm_access")?.optJSONArray("roles")?.let { arr ->
+            (0 until arr.length()).joinToString(",") { arr.optString(it) }
+        }.orEmpty()
+        return "keys=$keys scope=$scope aud=$aud resource=[$resource] realm=[$realmRoles]"
+    }
+
     /** OAuth 隐式/查询串回跳：`#access_token=…` 与 `?access_token=…`。 */
     fun accessTokenFromUrl(url: String?): String? {
         val text = url?.takeIf { it.isNotBlank() } ?: return null

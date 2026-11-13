@@ -89,6 +89,8 @@ class CloudFavoriteViewModelTest {
 
         override suspend fun deleteSlot(cameraId: String, recipeId: String): String = ""
 
+        override suspend fun addRecipes(cameraId: String, recipeIds: List<String>): String = ""
+
         override suspend fun refreshAccessToken(refreshToken: String): Pair<String, String?>? = null
     }
 

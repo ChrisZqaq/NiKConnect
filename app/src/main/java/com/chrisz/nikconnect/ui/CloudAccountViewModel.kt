@@ -8,6 +8,7 @@ import com.chrisz.nikconnect.cloud.CloudCamera
 import com.chrisz.nikconnect.cloud.CloudException
 import com.chrisz.nikconnect.cloud.CloudMyRecipes
 import com.chrisz.nikconnect.cloud.CloudRecipe
+import com.chrisz.nikconnect.cloud.OwnedRecipe
 import com.chrisz.nikconnect.cloud.CloudSlot
 import com.chrisz.nikconnect.cloud.CloudSlotAssignment
 import com.chrisz.nikconnect.cloud.guidCandidates
@@ -319,6 +320,56 @@ internal class CloudAccountViewModel(
         if (_state.value.draft == null) return
         _state.update { it.copy(pickingSlot = position) }
         if (_state.value.assignable.isEmpty()) loadAssignable()
+    }
+
+    /**
+     * 从「账号里的方案」直接放进槽位。
+     *
+     * 删空槽位后相机可分配池会被清空（H13 `recipe: []`），此时选择器没有可选项。
+     * 这里先 `IF_IR_R_C003` 把方案加回相机的池子，再刷新排布、再落到 draft 上。
+     */
+    fun fillSlotFromLibrary(position: Int, recipe: OwnedRecipe) {
+        val camera = _state.value.selected ?: return
+        val draft = _state.value.draft ?: return
+        if (position !in draft.indices) return
+        viewModelScope.launch {
+            _state.update { it.copy(loadingAssignable = true, saveError = null) }
+            try {
+                val client = clientFactory(accessToken, _state.value.guid.orEmpty())
+                client.addRecipes(camera.id, listOf(recipe.id))
+                val assignable = runCatching { client.fetchAssignable() }.getOrNull()
+                val slots = padSlots(
+                    client.cameraSlots(camera.id, assignable?.layouts?.get(camera.id)),
+                )
+                _state.update { current ->
+                    val currentDraft = current.draft ?: return@update current
+                    if (position !in currentDraft.indices) return@update current
+                    val next = currentDraft.toMutableList()
+                    next[position] = CloudSlot(
+                        index = next[position].index,
+                        recipeId = recipe.id,
+                        name = recipe.name,
+                        pictureControlName = recipe.pictureControlName,
+                        modifiedAt = "",
+                    )
+                    current.copy(
+                        assignable = assignable?.recipes ?: current.assignable,
+                        loadingAssignable = false,
+                        slots = slots,
+                        draft = next,
+                        pickingSlot = null,
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(
+                        loadingAssignable = false,
+                        saveError = describe(e as? CloudException, "IF_IR_R_C003"),
+                        rawSnippet = e.message,
+                    )
+                }
+            }
+        }
     }
 
     fun dismissSlotPicker() {
