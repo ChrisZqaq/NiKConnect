@@ -10,15 +10,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.chrisz.nikconnect.cloud.CLOUD_INDEX_URL
-import com.chrisz.nikconnect.cloud.CLOUD_CAMERA_URL
+
 import com.chrisz.nikconnect.cloud.CloudCapture
-import com.chrisz.nikconnect.cloud.CLOUD_CAMERA_URL
+import com.chrisz.nikconnect.cloud.CloudOidc
+
 import com.chrisz.nikconnect.cloud.guidFromJwt
 import com.chrisz.nikconnect.cloud.guidFromUrl
 import com.chrisz.nikconnect.cloud.isGuidLike
@@ -158,7 +160,84 @@ fun CloudLoginScreen(
     var capturedGuid by remember { mutableStateOf("") }
     var completed by remember { mutableStateOf(false) }
     var slow by remember { mutableStateOf(false) }
-    var openedCameraPage by remember { mutableStateOf(false) }
+    var oidcTried by remember { mutableStateOf(false) }
+    var oidcVerifier by remember { mutableStateOf<String?>(null) }
+    var oidcState by remember { mutableStateOf("") }
+    var interactiveTried by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    fun finishWith(token: String?, guid: String?, refresh: String?) {
+        if (completed) return
+        completed = true
+        onDone(CloudAuthState(token = token, guid = guid?.takeIf { it.isNotBlank() }, refreshToken = refresh))
+    }
+
+    /**
+     * 用自己的 OIDC 授权码流程换 token。
+     *
+     * `prompt=none`：WebView 里已有 Nikon ID 会话就直接回码；没有就回 `error=login_required`，
+     * 那时才把用户放回网页去登录。这条路的目的是绕开 Next 前端在第三方 iframe 里判会话的毛病。
+     */
+    fun startOidc(promptNone: Boolean = true) {
+        val view = webView ?: return
+        val (verifier, challenge) = CloudOidc.newPkce()
+        val state = CloudOidc.newState()
+        oidcVerifier = verifier
+        oidcState = state
+        oidcTried = true
+        runCatching { android.util.Log.d("NikConnect", "oidc start promptNone=$promptNone") }
+        view.loadUrl(CloudOidc.authorizeUrl(state, challenge, promptNone))
+    }
+
+    fun handleCallback(url: String) {
+        val cb = CloudOidc.parseCallback(url) ?: return
+        if (cb.code == null) {
+            runCatching { android.util.Log.d("NikConnect", "oidc no-code error=${cb.error}") }
+            // 没有 Keycloak 会话：改成交互模式，让 Keycloak 自己的登录页出来（尼康云创用 Nikon ID 代理登录）
+            if (cb.error == "login_required" && !interactiveTried) {
+                interactiveTried = true
+                webView?.post { startOidc(promptNone = false) }
+            }
+            return
+        }
+        if (cb.state.isNotBlank() && cb.state != oidcState) return
+        val verifier = oidcVerifier
+        runCatching { android.util.Log.d("NikConnect", "oidc code received") }
+        scope.launch {
+            val http = com.chrisz.nikconnect.cloud.CloudHttp()
+            val raw = runCatching {
+                http.post(
+                    com.chrisz.nikconnect.cloud.AUTH_HOST + "/protocol/openid-connect/token",
+                    CloudOidc.exchangeBody(cb.code, CloudOidc.REDIRECT_URI, verifier),
+                    mapOf("Content-Type" to "application/x-www-form-urlencoded"),
+                    "OIDC_CODE",
+                )
+            }.getOrElse { e ->
+                runCatching { android.util.Log.d("NikConnect", "oidc exchange failed: ${e.message}") }
+                oidcTried = false
+                webView?.post { webView?.loadUrl(CLOUD_INDEX_URL) }
+                return@launch
+            }
+            val parsed = com.chrisz.nikconnect.cloud.parseTokenResponse(raw)
+            if (parsed == null) {
+                oidcTried = false
+                webView?.post { webView?.loadUrl(CLOUD_INDEX_URL) }
+                return@launch
+            }
+            val (access, refresh) = parsed
+            // 账号 ID 从 userinfo 拿权威值；拿不到也不阻塞登录
+            val guid = runCatching {
+                val body = http.get(
+                    com.chrisz.nikconnect.cloud.AUTH_HOST + "/protocol/openid-connect/userinfo",
+                    mapOf("Authorization" to "Bearer $access"),
+                    "OIDC_USERINFO",
+                )
+                com.chrisz.nikconnect.cloud.parseIdentityForLogin(body)
+            }.getOrNull()
+            runCatching { android.util.Log.d("NikConnect", "oidc ok guid=${guid?.takeLast(6)}") }
+            webView?.post { finishWith(access, guid, refresh) }
+        }
+    }
 
     /** 抓到 token 立刻返回 App，用户不需要做任何确认动作。 */
     fun acceptToken(token: String?, guid: String?) {
@@ -255,6 +334,11 @@ fun CloudLoginScreen(
                             val uri = request?.url ?: return false
                             val navLog = "nav ${uri.host}${uri.path.orEmpty().take(60)}"
                             runCatching { android.util.Log.d("NikConnect", navLog) }
+                            if (uri.toString().startsWith(CloudOidc.REDIRECT_URI, ignoreCase = true)) {
+                                // 授权码回跳：不要真的去加载这个地址，直接换 token
+                                view?.post { handleCallback(uri.toString()) }
+                                return true
+                            }
                             val scheme = uri.scheme.orEmpty().lowercase()
                             // 自定义 scheme（含 App 自己的回调）不在 WebView 里处理，避免任意 intent 被页面触发
                             if (scheme != "https" && scheme != "http") return true
@@ -278,6 +362,14 @@ fun CloudLoginScreen(
                             if (!isTrustedUri(url)) return null
                             if (url.contains("/protocol/openid-connect/token") || url.contains("/protocol/openid-connect/auth")) {
                                 runCatching { android.util.Log.d("NikConnect", "oidc ${url.take(120)}") }
+                            }
+                            if (url.contains("accounts.cld.nikon.com.cn") || url.contains("auth.accounts")) {
+                                runCatching {
+                                    android.util.Log.d(
+                                        "NikConnect",
+                                        "sso ${request?.method} ${request?.url?.host}${request?.url?.path?.take(50)}",
+                                    )
+                                }
                             }
                             if (url.contains("api.user.")) {
                                 // 只打 key 不打 value：token 不能进日志
@@ -318,9 +410,10 @@ fun CloudLoginScreen(
                                 val cookies = android.webkit.CookieManager.getInstance()
                                 val cloud = cookies.getCookie("https://imagingcloud.nikon.com.cn").orEmpty()
                                 val sso = cookies.getCookie("https://accounts.cld.nikon.com.cn").orEmpty()
+                                fun names(raw: String) = raw.split("; ").mapNotNull { it.substringBefore('=').takeIf(String::isNotBlank) }
                                 android.util.Log.d(
                                     "NikConnect",
-                                    "page done ${url?.take(90)} cookies(cloud)=${cloud.length} cookies(sso)=${sso.length}",
+                                    "page done ${url?.take(90)} cloud=[${names(cloud).joinToString(",")}] sso=[${names(sso).joinToString(",")}]",
                                 )
                             }
                             val cookies = runCatching {
@@ -329,12 +422,10 @@ fun CloudLoginScreen(
                             }.getOrDefault("")
                             // 登录已完成（云创域有 cookie）但前端迟迟不发带 token 的请求时，
                             // 主动打开「云创 → 相机」页：该页一定会用 Bearer 调 C001，token 与 guid 一起落到请求头里。
-                            if (!completed && cookies.isNotEmpty() && !openedCameraPage &&
+                            if (!completed && !oidcTried && cookies.isNotEmpty() &&
                                 url?.contains("/recipe/index") == true
                             ) {
-                                openedCameraPage = true
-                                runCatching { android.util.Log.d("NikConnect", "nudge -> /recipe/camera") }
-                                view?.post { view.loadUrl(CLOUD_CAMERA_URL) }
+                                view?.post { startOidc() }
                             }
                             // 兼容 token 落在 localStorage / keycloak 实例上的情况
                             view?.evaluateJavascript(TOKEN_EXTRACT_JS) { value ->

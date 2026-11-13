@@ -566,6 +566,29 @@ else V().debug("newRecipeIdList length 0")   // ← 空数组根本不发请求
 
 验证：117 项 JVM 测试 0 失败；0.6.21 / vc 29，APK 57,336,376 字节 SHA-256 `335b6b10cddcf0c9c2a441ded3f4db7aefc7545d8fcd0804054d265873a984fd`，已装真机。
 
+## 2026-11-14 · 0.7.0：用自己的 OIDC 授权码流程换 token（绕开 Next 前端的 iframe 判会话）
+
+根因终于定死：尼康云创的 Next 前端靠 **keycloak-js 在第三方 iframe 里判会话**
+（`/protocol/openid-connect/3p-cookie`、`/login-status-iframe`）。在 WebView 里这条路一直判成"未登录"，
+于是 Nikon ID 明明登录成功（`accounts.cld.nikon.com.cn` 的 `SESSION` cookie 都在），页面还是弹回落地页，
+App 自然永远抓不到 token。
+
+**契约验证（curl，2026-11-13）**
+- `client_id=c0004` 是**公开客户端**：token 端点不带 secret 只回 `invalid_grant`（`Code not valid` / `Invalid refresh token`），不是 `invalid_client`。
+- `redirect_uri=https://imagingcloud.nikon.com.cn/auth/callback` **被服务端接受**：`prompt=none` 无会话时回 `302 → /auth/callback?error=login_required`；换外部域名才 `400 Invalid parameter: redirect_uri`。
+
+**实现（新增 `cloud/CloudOidc.kt`，纯函数 + 测试）**
+- `authorizeUrl(state, codeChallenge, promptNone)`、`parseCallback(url)`、`newPkce()`（S256）、`newState()`、`exchangeBody(code, redirectUri, verifier)`。
+- `ui/CloudLoginScreen.kt` 三条路径：
+  1. 云创首页加载完且云创域已有 cookie → **静默** `prompt=none` 拉码；
+  2. 回 `error=login_required` → **交互**模式（不带 `prompt=none`），Keycloak 自己出登录页（真机看到的是「短信验证码登录」，手机号已预填）；
+  3. 回跳 `…/auth/callback?code=…` 被 `shouldOverrideUrlLoading` 截住（不真加载），Kotlin 里 `POST /protocol/openid-connect/token` 换 access+refresh，再 `GET userinfo` 取权威 guid，然后 `onDone`。
+- 好处：不再依赖网页发请求时带的头，refresh_token 也一定拿到（静默续期成立）。
+
+验证：124 项 JVM 测试 0 失败（新增 `CloudOidcTest` 7 项）；0.7.0 / vc 31，APK 57,352,764 字节 SHA-256 `bc349b610e25376f9900f2d3c5ad4c40e44fd35ac0d2095fe6be8229d47ca56f`。
+
+真机：交互模式已把 Keycloak 的「短信验证码登录」页拉起来（短信确实到了），**验证码由用户本人输入**，之后应自动回 App。
+
 ## 开放问题
 
 1. 真实图库规模（120 / 300 / 更大）→ 决定 0.2 分页与批量元数据优先级。

@@ -148,6 +148,11 @@ internal data class CloudIdentity(
  *
  * 响应形状未在真机核验，解析一律「按特征嗅探」，失败时把原始响应交给 UI 显示，便于截图定位。
  */
+/** 登录流程里直接用 userinfo 拿账号 ID（不需要构造 client 实例）。 */
+internal fun parseIdentityForLogin(raw: String): String? =
+    runCatching { CloudAccountClient(accessToken = "", guid = "").parseIdentity(raw).guid }
+        .getOrNull()?.takeIf { it.isNotBlank() }
+
 internal class CloudAccountClient(
     private val accessToken: String,
     private val guid: String,
