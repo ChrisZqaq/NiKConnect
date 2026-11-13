@@ -126,7 +126,7 @@ Live View、遥控拍摄、滤镜实时预览、作品集、社交分享、多�
 | 0.3 后台能力 | 前台服务、通知、锁屏/后台行为 | JVM 与构建已通过 | 真机记录见 docs/acceptance/0.3.md |
 | 0.4 RAW 与修复 | NEF/NRW 原文件、队列重连、分页偏移、云创登录体验 | JVM、lintDebug、assembleDebug 已通过 | 真机验收见 docs/acceptance/0.4.md；RAW 哈希/分块和本轮修复仍待执行 |
 | 0.5 云创原生浏览 | 原生目录页（144 方案、封面、搜索/排序/仅 NEW）与详情页（参数表、EXIF、说明），离线种子先上屏 | 真机通过（0.5.2，2026-11-13 用户确认）；JVM 51 项、lintDebug、assembleDebug 已通过 | 遗留四项见 [acceptance/0.5.md](acceptance/0.5.md)：刷新频控、详情参数逐项对照、guid 命中来源、蜂窝封面流量 |
-| 0.6 云创账号（计划中） | 登录态收藏、相机 9 槽排布（`GET/PATCH /camera/{guid}/{cameraId}`）、失败恢复 | 0.5 真机通过 + 账号接口响应形状核对 | 真机核验槽位排布与相机端同步边界 |
+| 0.6 云创账号 | 登录态访问：相机列表（`IF_IR_R_C001`，主键 `deviceId`）、9 个云创槽位只读（`IF_IR_R_C002`）；排布写入与收藏属批次 2 | 批次 1 真机通过（0.6.5，2026-11-13 用户确认「能看到槽位了」） | 批次 2 待做：`PATCH /camera/{guid}/{cameraId}` 排布、`POST /publicrecipe/{guid}` 收藏、`POST /publicbook/{guid}` 新建书；细节项见 [acceptance/0.6.md](acceptance/0.6.md) |
 | B0/B1 Picture Control | 暂缓：本地 NP3 与槽位读写不在当前确认范围 | 用户明确重启该方向 | 单独建立产品需求与真机验收门 |
 | B1 Picture Control（暂缓） | 当前不排期 | 用户明确重启该方向 | 另建 PRD、风险与真机验收标准 |
 
@@ -275,6 +275,7 @@ Live View、参数拨盘、远程快门、滤镜 GPU 预览、作品集、地点
 | 0.3 真机 | 锁屏、退后台、网络变化、服务被杀后的状态 | ROM/系统版本 + 场景记录 |
 | 0.4 真机 | NEF/NRW 原文件、内存和不同分块对照 | 哈希 + 性能表 |
 | 0.5 真机 | 云创原生页：封面加载与滚动、详情参数与 EXIF、频控退避、离线种子→在线刷新、无网络下的降级 | ✅ 已执行（0.5.2，2026-11-13）：[acceptance/0.5.md](acceptance/0.5.md)；截图未留，缺口已列 |
+| 0.6 真机 | 云创账号只读：登录自动返回、账号 ID（userinfo）、相机列表（`deviceId`）、9 个云创槽位 | ✅ 已执行（0.6.5，2026-11-13）：[acceptance/0.6.md](acceptance/0.6.md)；细节项未逐条确认 |
 | 云创真机 | WebView 登录回 App、复制 token、列表/收藏与异常恢复 | 登录记录 + 脱敏 API 结果；不得记录 token |
 | NP3/Picture Control（暂缓） | 单独立项后定义 | 独立需求与验收记录 |
 
