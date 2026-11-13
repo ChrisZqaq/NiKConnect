@@ -17,6 +17,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.chrisz.nikconnect.cloud.CLOUD_INDEX_URL
 import com.chrisz.nikconnect.cloud.CLOUD_CAMERA_URL
+import com.chrisz.nikconnect.cloud.CloudCapture
+import com.chrisz.nikconnect.cloud.CLOUD_CAMERA_URL
 import com.chrisz.nikconnect.cloud.guidFromJwt
 import com.chrisz.nikconnect.cloud.guidFromUrl
 import com.chrisz.nikconnect.cloud.isGuidLike
@@ -24,6 +26,19 @@ import com.chrisz.nikconnect.cloud.isGuidLike
 /** 在当前页面 origin 内扫描 localStorage/sessionStorage/cookie，提取 access_token（JWT 以 eyJ 开头，不含 |）。 */
 private val TOKEN_EXTRACT_JS = """
 (function(){
+  // 1) 尼康云创用的是 keycloak-js 实例，token 常驻在实例内存里（不落 localStorage）
+  try{
+    var cands = [window.keycloak, window.__keycloak, window.kc];
+    try{ if(window.__NEXT_DATA__ && window.__NEXT_DATA__.keycloak) cands.push(window.__NEXT_DATA__.keycloak); }catch(e){}
+    for(var ci=0; ci<cands.length; ci++){
+      var k = cands[ci];
+      if(k && typeof k.token === 'string' && k.token.length > 40){
+        var gk = '';
+        try{ gk = (k.tokenParsed && (k.tokenParsed.guid || k.tokenParsed.userGuid)) || ''; }catch(e){}
+        return k.token + '|' + gk;
+      }
+    }
+  }catch(e){}
   function pick(str){
     if(!str || str.length < 20) return null;
     var m = str.match(/"access_token"\s*:\s*"([^"]{40,})"/);
@@ -79,38 +94,12 @@ private fun isTrustedUri(uri: String?): Boolean {
     return TRUSTED_HOST_SUFFIXES.any { host == it || host.endsWith(".$it") }
 }
 
-/** 从请求头里取云创 token：优先 `access_token`，其次 `Authorization: Bearer`。 */
-private fun tokenFromHeaders(headers: Map<String, String>?): String? {
-    if (headers.isNullOrEmpty()) return null
-    headers.entries.firstOrNull { it.key.equals("access_token", ignoreCase = true) }
-        ?.value?.trim()?.trim('"')?.takeIf { it.length > 40 }?.let { return it }
-    headers.entries.firstOrNull { it.key.equals("authorization", ignoreCase = true) }
-        ?.value?.trim()
-        ?.takeIf { it.startsWith("Bearer ", ignoreCase = true) }
-        ?.substring(7)?.trim()?.trim('"')?.takeIf { it.length > 40 }?.let { return it }
-    return null
-}
+private fun tokenFromHeaders(headers: Map<String, String>?): String? =
+    CloudCapture.accessTokenFromHeaders(headers)
 
-/** 从请求头里取 guid：`guid` / `x-guid` / `user-guid` / `userid` 等常见命名。 */
-private fun guidFromHeaders(headers: Map<String, String>?): String? {
-    if (headers.isNullOrEmpty()) return null
-    val candidate = headers.entries.firstOrNull { entry ->
-        val key = entry.key.lowercase()
-        key == "guid" || key == "userid" || key.contains("guid")
-    }?.value?.trim()?.trim('"') ?: return null
-    return candidate.takeIf(::isGuidLike)
-}
+private fun guidFromHeaders(headers: Map<String, String>?): String? = CloudCapture.guidFromHeaders(headers)
 
-/** OAuth 隐式/查询串回跳里直接带 token 的情况：`#access_token=...` 与 `?access_token=...`。 */
-private fun tokenFromUrl(url: String): String? {
-    val marker = "access_token="
-    val at = url.indexOf(marker)
-    if (at < 0) return null
-    return url.substring(at + marker.length)
-        .substringBefore('&')
-        .substringBefore('#')
-        .takeIf { it.length > 40 }
-}
+private fun tokenFromUrl(url: String): String? = CloudCapture.accessTokenFromUrl(url)
 
 /**
  * 云创登录结果：token 与用户 guid 由 WebView 抓取。
@@ -169,6 +158,7 @@ fun CloudLoginScreen(
     var capturedGuid by remember { mutableStateOf("") }
     var completed by remember { mutableStateOf(false) }
     var slow by remember { mutableStateOf(false) }
+    var openedCameraPage by remember { mutableStateOf(false) }
 
     /** 抓到 token 立刻返回 App，用户不需要做任何确认动作。 */
     fun acceptToken(token: String?, guid: String?) {
@@ -197,6 +187,19 @@ fun CloudLoginScreen(
     LaunchedEffect(Unit) {
         kotlinx.coroutines.delay(25_000)
         slow = true
+    }
+
+    // 登录完成后 token 可能晚几秒才出现在 DOM/JS 里，轮询几次比"只探一次"稳
+    LaunchedEffect(Unit) {
+        repeat(15) {
+            kotlinx.coroutines.delay(2_000)
+            if (completed) return@LaunchedEffect
+            val view = webView ?: return@LaunchedEffect
+            view.evaluateJavascript(TOKEN_EXTRACT_JS) { value ->
+                val (token, guid) = CloudCapture.parseProbeResult(value)
+                if (token != null || guid != null) view.post { acceptToken(token, guid) }
+            }
+        }
     }
 
     DisposableEffect(Unit) {
@@ -320,13 +323,24 @@ fun CloudLoginScreen(
                                     "page done ${url?.take(90)} cookies(cloud)=${cloud.length} cookies(sso)=${sso.length}",
                                 )
                             }
-                            // 兼容 token 落在 localStorage 的情况
+                            val cookies = runCatching {
+                                android.webkit.CookieManager.getInstance()
+                                    .getCookie("https://imagingcloud.nikon.com.cn").orEmpty()
+                            }.getOrDefault("")
+                            // 登录已完成（云创域有 cookie）但前端迟迟不发带 token 的请求时，
+                            // 主动打开「云创 → 相机」页：该页一定会用 Bearer 调 C001，token 与 guid 一起落到请求头里。
+                            if (!completed && cookies.isNotEmpty() && !openedCameraPage &&
+                                url?.contains("/recipe/index") == true
+                            ) {
+                                openedCameraPage = true
+                                runCatching { android.util.Log.d("NikConnect", "nudge -> /recipe/camera") }
+                                view?.post { view.loadUrl(CLOUD_CAMERA_URL) }
+                            }
+                            // 兼容 token 落在 localStorage / keycloak 实例上的情况
                             view?.evaluateJavascript(TOKEN_EXTRACT_JS) { value ->
-                                val raw = value?.trim('"', ' ', '|').orEmpty()
-                                if (raw.isEmpty()) return@evaluateJavascript
-                                view.post {
-                                    acceptToken(raw.substringBefore('|'), raw.substringAfter('|', ""))
-                                }
+                                val (token, guid) = CloudCapture.parseProbeResult(value)
+                                if (token == null && guid == null) return@evaluateJavascript
+                                view.post { acceptToken(token, guid) }
                             }
                         }
                     }

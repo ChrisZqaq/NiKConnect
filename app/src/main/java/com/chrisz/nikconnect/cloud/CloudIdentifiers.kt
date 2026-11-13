@@ -3,16 +3,28 @@ package com.chrisz.nikconnect.cloud
 import android.util.Base64
 import org.json.JSONObject
 
-/** 云创账号 guid 的两种可能形态：26 位 ULID（Crockford Base32）或 UUID。 */
+/**
+ * 云创账号 guid 的三种形态：
+ * - 真机实测的账号 ID：16 位纯数字（`0000000000062160`）
+ * - 26 位 ULID（Crockford Base32），库里方案/书 ID 都是这形态
+ * - UUID（Keycloak 用户 UUID，形如 `f107dda0-3bd2-…`）
+ */
+internal val ACCOUNT_ID_PATTERN = Regex("[0-9]{16}")
 internal val ULID_PATTERN = Regex("[0-9A-HJKMNP-TV-Z]{26}")
 internal val UUID_PATTERN =
     Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+
+/**
+ * 云创公共接口把 guid 段写成固定占位符 `0000000000000001`（例如
+ * `/publicrecipe/0000000000000001/{recipeId}`），它不是任何账号的 ID，绝不能拿去请求 C001。
+ */
+internal const val PLACEHOLDER_GUID = "0000000000000001"
 
 /** 账号 guid 出现在这些路径段之后：`/camera/{guid}/`、`/publicrecipe/{guid}`… */
 private val GUID_PATH_KEYWORDS = listOf("camera", "publicrecipe", "localrecipe", "publicbook")
 
 internal fun isGuidLike(value: String): Boolean =
-    ULID_PATTERN.matches(value) || UUID_PATTERN.matches(value)
+    ACCOUNT_ID_PATTERN.matches(value) || ULID_PATTERN.matches(value) || UUID_PATTERN.matches(value)
 
 /**
  * 从请求 URL 里取账号 guid（语义提取，不是"随便找一个 ULID"）。
@@ -31,6 +43,7 @@ internal fun guidFromUrl(url: String?): String? {
         if (GUID_PATH_KEYWORDS.any { it.equals(segment, ignoreCase = true) }) {
             val next = segments.getOrNull(index + 1) ?: return null
             // 只认紧邻关键字的那一段；不是 guid 形态就直接放弃，不往后找（避免抓到方案 ID）
+            if (next == PLACEHOLDER_GUID) return null
             return next.takeIf(::isGuidLike)
         }
     }

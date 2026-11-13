@@ -553,6 +553,19 @@ else V().debug("newRecipeIdList length 0")   // ← 空数组根本不发请求
 - 另加 `xhr` 日志（只打 host+path+header **键名**，不打值）：用于确认云创前端到底把 token 放在 `access_token` 还是 `Authorization`，以及是否根本还没发这类请求。
 - 验证：109 项 JVM 测试 0 失败；0.6.20 / vc 28，已装真机。**待用户复测点登录**。
 
+## 2026-11-14 · 0.6.21：登录抓取补齐（keycloak 内存 token / 轮询 / 相机页兜底 / 16 位账号 ID）
+
+0.6.20 开了第三方 cookie 后真机日志已经能走到 `imagingcloud.nikon.com.cn/home`，但前端仍不一定会发出带 token 的接口。本轮把"抓取"这一层做厚：
+
+- **账号 ID 形态补 16 位纯数字**：真机账号 ID 是 `0000000000062160`（16 位数字），而 `isGuidLike` 之前只认 26 位 ULID 与 UUID → guid 抓到了也被丢弃。新增 `ACCOUNT_ID_PATTERN = Regex("[0-9]{16}")`（`cloud/CloudIdentifiers.kt`）。
+- **占位符排除**：公共接口的 guid 段是固定占位 `0000000000000001`（`/publicrecipe/0000000000000001/{recipeId}`），它与 16 位规则撞车；新增 `PLACEHOLDER_GUID` 并在 `guidFromUrl` 里直接返回 null，避免又拿假的 guid 去打 C001。
+- **JS 探针先看 keycloak 实例**：`TOKEN_EXTRACT_JS` 开头依次试 `window.keycloak` / `__keycloak` / `kc` / `__NEXT_DATA__.keycloak` 的 `.token`，并用 `tokenParsed.guid` 带出账号 ID；keycloak-js 的 token 常驻内存，扫 localStorage 是扫不到的。
+- **轮询**：登录页每 2 秒探一次、最多 15 次，抓到即停（token 往往比页面晚几秒才出现）。
+- **相机页兜底**：`onPageFinished` 若云创域已有 cookie、但仍未抓到 token，且当前在 `/recipe/index`，自动 `loadUrl(CLOUD_CAMERA_URL)`（`/recipe/camera`）——该页一定会用 `Bearer` 调 `IF_IR_R_C001`，token 与 guid 会一起落到请求头里。
+- **抓取逻辑抽成纯函数**：新增 `cloud/CloudCapture.kt`（`accessTokenFromHeaders` / `guidFromHeaders` / `accessTokenFromUrl` / `parseProbeResult`），`CloudLoginScreen` 只做调用，新增 `CloudCaptureTest` 8 项锁死行为。
+
+验证：117 项 JVM 测试 0 失败；0.6.21 / vc 29，APK 57,336,376 字节 SHA-256 `335b6b10cddcf0c9c2a441ded3f4db7aefc7545d8fcd0804054d265873a984fd`，已装真机。
+
 ## 开放问题
 
 1. 真实图库规模（120 / 300 / 更大）→ 决定 0.2 分页与批量元数据优先级。
