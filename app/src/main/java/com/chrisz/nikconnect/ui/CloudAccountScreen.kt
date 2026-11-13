@@ -25,8 +25,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -40,6 +43,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
@@ -56,6 +60,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.chrisz.nikconnect.cloud.CloudSlot
 import com.chrisz.nikconnect.cloud.CloudRecipe
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
@@ -81,6 +86,7 @@ internal fun CloudAccountScreen(
     }
     val model: CloudAccountViewModel = viewModel(key = "cloud-account-$guid", factory = factory)
     val state by model.state.collectAsStateWithLifecycle()
+    var pendingDelete by remember { mutableStateOf<CloudSlot?>(null) }
 
     // 同一个 guid 重新登录后 token 会变：把新凭据交给已有 ViewModel，旧请求随代次变化失效。
     LaunchedEffect(token, guid) { model.updateCredentials(token, guid) }
@@ -123,10 +129,32 @@ internal fun CloudAccountScreen(
                 onEdit = model::beginEdit,
                 onCancelEdit = model::cancelEdit,
                 onMove = model::moveSlot,
-                onClear = model::clearSlot,
+                onRequestDelete = { pendingDelete = it },
                 onPick = model::openSlotPicker,
                 onSave = model::saveLayout,
                 onNoticeShown = model::consumeNotice,
+            )
+        }
+        pendingDelete?.let { slot ->
+            AlertDialog(
+                onDismissRequest = { pendingDelete = null },
+                title = { Text("删除这个槽位方案？") },
+                text = {
+                    Text(
+                        "${slot.name.ifBlank { slot.pictureControlName }}（第 ${slot.index} 个槽位）会立即从账号移除；" +
+                            "相机下次联网同步时该位会变空。",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            pendingDelete = null
+                            slot.recipeId?.takeIf { it.isNotBlank() }?.let(model::deleteSlot)
+                        },
+                    ) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                },
+                dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("取消") } },
             )
         }
         state.pickingSlot?.let { position ->
@@ -279,7 +307,7 @@ private fun SlotSection(
     onEdit: () -> Unit,
     onCancelEdit: () -> Unit,
     onMove: (Int, Int) -> Unit,
-    onClear: (Int) -> Unit,
+    onRequestDelete: (CloudSlot) -> Unit,
     onPick: (Int) -> Unit,
     onSave: () -> Unit,
     onNoticeShown: () -> Unit,
@@ -349,7 +377,7 @@ private fun SlotSection(
 
         if (editing) {
             Text(
-                "长按拖动换位 · 点击已占用槽位＝清空 · 点击空槽位＝从可分配池挑方案 · 保存后相机联网时会重新拉取",
+                "长按拖动换位 · 点空槽位的「＋」从可分配池挑方案 · 保存后相机联网时会重新拉取。删除在非编辑态用行尾垃圾桶（立即生效）",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -387,8 +415,8 @@ private fun SlotSection(
                                     )
                                 }
                                 .clickable {
-                                    // 有方案 → 清空；空位 → 从可分配池里挑一个
-                                    if (slot.occupied) onClear(position) else onPick(position)
+                                    // 编辑态空位点整行也能挑方案；删除走行尾图标，避免与拖动/点击混淆
+                                    if (!slot.occupied) onPick(position)
                                 }
                         } else {
                             Modifier
@@ -423,11 +451,33 @@ private fun SlotSection(
                     }
                 }
                 if (editing) {
-                    Icon(
-                        Icons.Default.Menu,
-                        contentDescription = "长按拖动",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    if (!slot.occupied) {
+                        IconButton(onClick = { onPick(position) }, modifier = Modifier.size(48.dp)) {
+                            Icon(Icons.Default.Add, contentDescription = "为该槽位添加方案")
+                        }
+                    } else {
+                        Icon(
+                            Icons.Default.Menu,
+                            contentDescription = "长按拖动",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else if (slot.occupied) {
+                    if (state.deleting == slot.recipeId) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    } else {
+                        IconButton(
+                            onClick = { onRequestDelete(slot) },
+                            enabled = state.deleting == null,
+                            modifier = Modifier.size(48.dp),
+                        ) {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = "删除该槽位方案",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                 } else if (slot.modifiedAt.isNotBlank()) {
                     Text(
                         slot.modifiedAt.take(10),

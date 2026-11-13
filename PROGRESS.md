@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-- **版本**：0.6.7-alpha（0.6 批次 2：排布编辑 + 空槽位从可分配池选方案；清空到底改走 `DELETE`，修掉空数组 PATCH 的 422；JVM 78 项测试通过，真机待验）
+- **版本**：0.6.8-alpha（0.6 批次 2：换位已真机通过；删除改为行尾垃圾桶 → 立即 `DELETE`（C005），槽位固定渲染 9 格让空位可加；JVM 80 项测试通过）
 - **真机基线**：一加 Ace 5 Pro + Nikon Zf
 - **未关闭验证**：0.4 RAW 哈希/分块对照；0.5 遗留三项（在线刷新频控、详情参数与官网逐项对照、蜂窝网络封面流量）；0.6 只读部分的细节项（槽位号与网页端逐位对照、已占用/空位区分、可分配方案数、token 长时失效）见 [docs/acceptance/0.6.md](docs/acceptance/0.6.md)；0.6 批次 2（拖拽排布、收藏到书）未开工
 
@@ -412,6 +412,20 @@ else V().debug("newRecipeIdList length 0")   // ← 空数组根本不发请求
 - `describe()` 里 422 不再武断说"账号 ID 不对"（空数组/缺字段都会 422），改为如实回显服务端原文。
 - 空槽位可挑方案：`openSlotPicker`/`fillSlot` + `loadAssignable`（`IF_FR100_H13`）；编辑态点击空槽位弹 `SlotPicker` 底部抽屉，来源是**账号可分配池**。池为空时提示"先在云创网页收藏方案"——收藏（`POST /publicrecipe/{guid}`）属于下一批。
 - 测试 +4（顺序没变、换位、全清空走删除、空位新增），JVM 78 项全绿。
+
+## 2026-11-13 · 0.6.8：删除走 C005，槽位固定 9 格
+
+真机反馈（0.6.7）：换位置可以，相机也能识别；但删除不行，也没有空槽位可加。报错 `IF_IR_R_C004 HTTP 400`，请求体是**带两个 slotNo 的 PATCH**。
+
+两个问题，各自的根因不同：
+
+1. **删除没有被"表达"出来**。上一版把"清空"做成"点击槽位把 draft 置空，再靠 PATCH 缺省表达删除"。真机上点击没有改变 draft（拖动与点击共用一个 `pointerInput`，点击被长按手势吃掉），于是 PATCH 原样把两条又发了一遍；而服务端对缺省/重复的排布回 400。改法：删除不再靠 PATCH 缺省，改为**行尾垃圾桶图标 → 确认 → 立即 `DELETE /camera/{guid}/{deviceId}/{recipeId}`（C005）→ 重新 GET**。这也与 Web 端删除实现一致。
+2. **没有空槽位可加**：真机 C002 只返回已占用的项（2 个方案就 2 条），界面照抄就只有 2 行，自然没有"＋"。改法：新增纯函数 `padSlots(slots, count = 9)`，UI 永远按 9 格渲染，空位 `index` 保留真实槽位号，点空位行或「＋」从可分配池挑方案。
+
+- `cloud/CloudAccountClient.kt`：新增 `padSlots()`；`CloudSlot` 的空槽位默认值不再必填。
+- `ui/CloudAccountViewModel.kt`：新增 `deleteSlot(recipeId)`（立即 C005 + 重新 GET + 代次保护）；`openCamera`/`saveLayout`/`deleteSlot` 的响应统一过 `padSlots`；删除旧的 `clearSlot()`。
+- `ui/CloudAccountScreen.kt`：编辑态——拖动把手 + 空位「＋」；非编辑态——占用行尾垃圾桶（删除中显示进度）、确认弹窗；`pendingDelete` 提到屏幕层避免与槽位区状态耦合。
+- 测试 +2（补齐 9 格、有空洞时不挪位），JVM 80 项全绿。
 
 ## 开放问题
 

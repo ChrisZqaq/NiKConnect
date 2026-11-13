@@ -23,12 +23,27 @@ internal data class CloudCamera(
  */
 internal data class CloudSlot(
     val index: Int,
-    val recipeId: String?,
-    val name: String,
-    val pictureControlName: String,
-    val modifiedAt: String,
+    val recipeId: String? = null,
+    val name: String = "",
+    val pictureControlName: String = "",
+    val modifiedAt: String = "",
 ) {
     val occupied: Boolean get() = !recipeId.isNullOrBlank() || name.isNotBlank()
+}
+
+/**
+ * 把槽位补齐到固定 9 格。
+ *
+ * 真机上 `IF_IR_R_C002` 只返回**已占用**的项（相机上只有 2 个方案就只给 2 条），
+ * 界面若照抄就会「没有空槽位可以新增」。空的槽位用 [CloudSlot] 默认值占位，
+ * `index` 保持 1..9，界面用它算 `slotNo`。
+ */
+internal fun padSlots(slots: List<CloudSlot>, count: Int = 9): List<CloudSlot> {
+    val sorted = slots.sortedBy { it.index }
+    if (sorted.size >= count) return sorted
+    val taken = sorted.map { it.index }.toSet()
+    return (sorted + (1..count).filterNot { it in taken }.map { CloudSlot(index = it) })
+        .sortedBy { it.index }
 }
 
 /**

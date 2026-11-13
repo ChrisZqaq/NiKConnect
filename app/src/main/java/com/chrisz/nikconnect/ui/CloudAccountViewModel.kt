@@ -9,6 +9,7 @@ import com.chrisz.nikconnect.cloud.CloudSlot
 import com.chrisz.nikconnect.cloud.CloudRecipe
 import com.chrisz.nikconnect.cloud.CloudSlotAssignment
 import com.chrisz.nikconnect.cloud.guidCandidates
+import com.chrisz.nikconnect.cloud.padSlots
 import com.chrisz.nikconnect.cloud.planSlotWrite
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -35,6 +36,8 @@ internal data class CloudAccountState(
     /** 编辑态：非 null 表示正在改排布，值为界面上看到的顺序（与服务端数据分离，取消即丢弃）。 */
     val draft: List<CloudSlot>? = null,
     val saving: Boolean = false,
+    /** 正在删除的槽位方案 ID（非 null 时该行显示进度、按钮禁用）。 */
+    val deleting: String? = null,
     val saveError: String? = null,
     /** 保存成功的瞬时提示（UI 消费后置空）。 */
     val savedNotice: String? = null,
@@ -174,7 +177,7 @@ internal class CloudAccountViewModel(
                 if (requestId != slotRequestId || _state.value.selected?.id != camera.id) return@launch
                 _state.update {
                     it.copy(
-                        slots = slots,
+                        slots = padSlots(slots),
                         loadingSlots = false,
                         slotsError = if (slots.isEmpty()) "相机没有返回槽位数据。" else null,
                     )
@@ -264,7 +267,9 @@ internal class CloudAccountViewModel(
     fun beginEdit() {
         val slots = _state.value.slots
         if (slots.isEmpty()) return
-        _state.update { it.copy(draft = slots.sortedBy { s -> s.index }, saveError = null, savedNotice = null) }
+        _state.update {
+            it.copy(draft = padSlots(slots), saveError = null, savedNotice = null)
+        }
     }
 
     fun cancelEdit() {
@@ -281,15 +286,43 @@ internal class CloudAccountViewModel(
         _state.update { it.copy(draft = next, saveError = null) }
     }
 
-    /** 点击槽位：占用 → 变空；空 → 变回"空"占位（不做填充，选方案是下面的事）。 */
-    fun clearSlot(position: Int) {
-        val draft = _state.value.draft ?: return
-        if (position !in draft.indices) return
-        val slot = draft[position]
-        if (!slot.occupied) return
-        val next = draft.toMutableList()
-        next[position] = slot.copy(recipeId = null, name = "", pictureControlName = "", modifiedAt = "")
-        _state.update { it.copy(draft = next, saveError = null) }
+    /**
+     * 删除单个槽位方案：直接 `DELETE /camera/{guid}/{deviceId}/{recipeId}`（IF_IR_R_C005）。
+     *
+     * 不做"先标空、再 PATCH 缺省"——真机验证过 PATCH 缺省不成立（服务端 400），
+     * Web 端删除也是逐条 DELETE。删完立即重新 GET，用服务端结果覆盖本地。
+     */
+    fun deleteSlot(recipeId: String) {
+        val camera = _state.value.selected ?: return
+        if (recipeId.isBlank() || _state.value.deleting != null) return
+        val guid = workingGuid ?: _state.value.guid ?: return
+        _state.update { it.copy(deleting = recipeId, saveError = null, rawSnippet = null) }
+        val requestId = ++slotRequestId
+        viewModelScope.launch {
+            val client = CloudAccountClient(accessToken = accessToken, guid = guid)
+            try {
+                client.deleteSlot(camera.id, recipeId)
+                val refreshed = client.cameraSlots(camera.id)
+                if (requestId != slotRequestId || _state.value.selected?.id != camera.id) return@launch
+                _state.update {
+                    it.copy(
+                        slots = padSlots(refreshed),
+                        draft = null,
+                        deleting = null,
+                        savedNotice = "已删除该槽位方案",
+                    )
+                }
+            } catch (e: CloudException) {
+                if (requestId != slotRequestId) return@launch
+                _state.update {
+                    it.copy(
+                        deleting = null,
+                        saveError = describe(e, "IF_IR_R_C005"),
+                        rawSnippet = "DELETE /camera/{guid}/${camera.id}/$recipeId\n${e.message}",
+                    )
+                }
+            }
+        }
     }
 
     /**
@@ -326,7 +359,7 @@ internal class CloudAccountViewModel(
                 val refreshed = client.cameraSlots(camera.id)
                 _state.update {
                     it.copy(
-                        slots = refreshed,
+                        slots = padSlots(refreshed),
                         draft = null,
                         saving = false,
                         savedNotice = if (plan.assignments == null) {
@@ -380,6 +413,7 @@ internal class CloudAccountViewModel(
     }
 
     private companion object {
+
         /** 服务端认为 guid 不合法时的状态码：400 参数错、401/403 认证、422 无法处理。 */
         val GUID_REJECTED_CODES = setOf(400, 401, 403, 422)
     }

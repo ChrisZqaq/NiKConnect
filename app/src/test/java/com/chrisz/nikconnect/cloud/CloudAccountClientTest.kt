@@ -249,4 +249,29 @@ class CloudAccountClientTest {
             plan.assignments,
         )
     }
+
+    // ---- 槽位补齐（真机：C002 只返回已占用项） ----
+
+    @Test
+    fun `padSlots fills an empty nine slot grid`() {
+        val slots = padSlots(
+            listOf(
+                CloudSlot(index = 1, recipeId = "A", name = "A", pictureControlName = "pc", modifiedAt = ""),
+                CloudSlot(index = 2, recipeId = "B", name = "B", pictureControlName = "pc", modifiedAt = ""),
+            ),
+        )
+        assertEquals(9, slots.size)
+        assertEquals((1..9).toList(), slots.map { it.index })
+        assertTrue(slots[0].occupied)
+        assertTrue(slots[1].occupied)
+        assertFalse(slots[2].occupied)
+    }
+
+    @Test
+    fun `padSlots keeps gaps and does not shift indexes`() {
+        val slots = padSlots(listOf(CloudSlot(index = 5, recipeId = "E", name = "E", pictureControlName = "", modifiedAt = "")))
+        assertEquals((1..9).toList(), slots.map { it.index })
+        assertTrue(slots[4].occupied)
+        assertFalse(slots[3].occupied)
+    }
 }
