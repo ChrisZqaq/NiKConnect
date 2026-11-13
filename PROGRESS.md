@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-- **版本**：0.6.5-alpha（云创账号批次 1 真机通过：账号 ID 走 Keycloak `userinfo`、相机列表按 `deviceId` 解析、9 个云创槽位可见——验收记录见 [docs/acceptance/0.6.md](docs/acceptance/0.6.md)；JVM 71 项测试通过）
+- **版本**：0.6.6-alpha（0.6 批次 2：云创槽位排布可编辑——长按拖动换位、点击清空、`PATCH /camera/{guid}/{deviceId}` 写回后重新 GET 校对；JVM 74 项测试通过，真机待验）
 - **真机基线**：一加 Ace 5 Pro + Nikon Zf
 - **未关闭验证**：0.4 RAW 哈希/分块对照；0.5 遗留三项（在线刷新频控、详情参数与官网逐项对照、蜂窝网络封面流量）；0.6 只读部分的细节项（槽位号与网页端逐位对照、已占用/空位区分、可分配方案数、token 长时失效）见 [docs/acceptance/0.6.md](docs/acceptance/0.6.md)；0.6 批次 2（拖拽排布、收藏到书）未开工
 
@@ -367,6 +367,29 @@ IF_IR_R_C001 返回的相机列表结构无法识别（255 字节）：
 - 槽位解析同步放宽：`SLOT_KEYS` 追加 `pictureControls`/`pictureControl`/`controlList`，`mustHave` 追加 `recipeId`（C002 真身还没见到，先放宽再按真身校准）。
 - `ui/CloudAccountScreen.kt` 相机行副标题改为 `型号 · SN 8032632 · 01JTC8JS`（能直接对上机身序列号，方便确认是哪台机器）。
 - 测试：新增「real camera payload uses deviceId」1 项，JVM 71 项全绿。
+
+## 2026-11-13 · 0.6.6：槽位排布写入（批次 2 第一批）
+
+从 Web chunk `camera-129ad77c551770c0.js` 拿到 C004 的确切契约（不是猜的）：
+
+```js
+// 拖拽结束的提交逻辑
+let c = l.map((e,s) => e.id.startsWith("blank") ? null : { slotNo: s + 1, recipeId: e.id })
+        .filter(e => null !== e);
+if (c.length) { if (!await R(m, _, x.deviceId, c)) a.push("/systemError") }
+
+// R = PATCH /camera/{guid}/{deviceId}
+//   headers: Content-Type: application/json + Authorization: Bearer <token>
+//   body:    { recipes: c }
+```
+
+关键语义：**空位不发送**，靠"不在数组里"表达；`slotNo` 从 1 开始；数组按 `slotNo` 顺序。
+
+- `cloud/CloudHttp.kt`：新增 `patch()`，并为所有请求增加 `contentType` 参数（默认仍是 `text/plain;charset=UTF-8`，与 Web 端 IF_FR 接口一致；C004 显式传 `application/json`）。
+- `cloud/CloudAccountClient.kt`：新增 `CloudSlotAssignment(slotNo, recipeId)`、`suspend fun replaceSlots(cameraId, assignments)`、纯函数 `buildSlotBody()`（过滤空 recipeId、按 slotNo 升序）。
+- `ui/CloudAccountViewModel.kt`：`draft`（编辑态副本，与服务端数据分离）+ `saving`/`saveError`/`savedNotice`；`beginEdit`/`cancelEdit`/`moveSlot(from,to)`/`clearSlot(position)`/`saveLayout`/`consumeNotice`。`saveLayout` 成功后**重新 GET 一次 C002**，以服务端结果覆盖 draft——不信本地。
+- `ui/CloudAccountScreen.kt`：槽位区改为可编辑——`编辑排布` 进入编辑态，`长按拖动换位`（`detectDragGesturesAfterLongPress` + 固定 64dp 行高算位移），`点击清空该槽位`，`保存到相机`（保存中显示进度），`撤销` 丢弃 draft。
+- 测试：新增 3 项 body 构造用例（排序、空 recipeId 过滤、全空），JVM 74 项全绿。
 
 ## 开放问题
 

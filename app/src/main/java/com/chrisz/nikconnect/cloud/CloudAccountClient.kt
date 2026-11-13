@@ -5,6 +5,9 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /** 已注册到云创账号的相机。 */
 internal data class CloudCamera(
@@ -27,6 +30,15 @@ internal data class CloudSlot(
 ) {
     val occupied: Boolean get() = !recipeId.isNullOrBlank() || name.isNotBlank()
 }
+
+/**
+ * 一次槽位排布提交项。Web 端 PATCH 的 body 就是 `{recipes:[{slotNo,recipeId}]}`，
+ * 且**只提交已占用的槽位**（空位靠"不在数组里"表示，不是 `null`）。
+ */
+internal data class CloudSlotAssignment(
+    val slotNo: Int,
+    val recipeId: String,
+)
 
 /** 账号中心（Keycloak userinfo）返回的身份信息：账号 ID 的唯一权威来源。 */
 internal data class CloudIdentity(
@@ -73,6 +85,26 @@ internal class CloudAccountClient(
     suspend fun cameraSlots(cameraId: String): List<CloudSlot> = withContext(Dispatchers.IO) {
         val raw = http.get("$IR_HOST/camera/$guid/$cameraId", bearer, "IF_IR_R_C002")
         parseSlots(raw)
+    }
+
+    /**
+     * 覆盖相机上的 9 个云创槽位排布（`IF_IR_R_C004`）。
+     *
+     * 语义来自 Web chunk 的拖拽回调：
+     * `l.map((e,s)=> e.id.startsWith("blank") ? null : {slotNo: s+1, recipeId: e.id}).filter(nonNull)`
+     * 然后 `PATCH /camera/{guid}/{deviceId}` + `Content-Type: application/json`，body `{recipes:[...]}`。
+     */
+    suspend fun replaceSlots(cameraId: String, assignments: List<CloudSlotAssignment>) = withContext(Dispatchers.IO) {
+        val raw = http.patch(
+            "$IR_HOST/camera/$guid/$cameraId",
+            buildSlotBody(assignments),
+            bearer,
+            "IF_IR_R_C004",
+            contentType = "application/json",
+        )
+        // 成功时 Web 端只判断"有返回值"；这里同样不猜结构，非异常即视为提交成功，
+        // 真正的排布以随后重新 GET 的结果为准。
+        raw
     }
 
     suspend fun assignableRecipes(): List<CloudRecipe> = withContext(Dispatchers.IO) {
@@ -150,6 +182,25 @@ internal class CloudAccountClient(
             )
         }
     }
+
+    /** PATCH body 构造（纯函数，便于单测）：只发已占用槽位，按 slotNo 升序。 */
+    fun buildSlotBody(assignments: List<CloudSlotAssignment>): String = buildJsonObject {
+        put(
+            "recipes",
+            buildJsonArray {
+                assignments.filter { it.recipeId.isNotBlank() }
+                    .sortedBy { it.slotNo }
+                    .forEach { entry ->
+                        add(
+                            buildJsonObject {
+                                put("slotNo", entry.slotNo)
+                                put("recipeId", entry.recipeId)
+                            },
+                        )
+                    }
+            },
+        )
+    }.toString()
 
     fun parseIdentity(raw: String): CloudIdentity {
         val element = http.parseElement(raw, "OIDC_USERINFO")

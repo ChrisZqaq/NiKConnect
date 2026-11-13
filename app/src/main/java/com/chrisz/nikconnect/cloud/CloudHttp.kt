@@ -1,8 +1,10 @@
 package com.chrisz.nikconnect.cloud
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -60,6 +62,14 @@ internal class CloudHttp(
     suspend fun get(url: String, headers: Map<String, String>, callId: String): String =
         request("GET", url, null, headers, callId)
 
+    suspend fun patch(
+        url: String,
+        body: String,
+        headers: Map<String, String>,
+        callId: String,
+        contentType: String = "text/plain;charset=UTF-8",
+    ): String = request("PATCH", url, body, headers, callId, contentType)
+
     suspend fun post(url: String, body: String?, headers: Map<String, String>, callId: String): String =
         request("POST", url, body, headers, callId)
 
@@ -75,12 +85,13 @@ internal class CloudHttp(
         body: String?,
         headers: Map<String, String>,
         callId: String,
+        contentType: String = "text/plain;charset=UTF-8",
     ): String {
         var attempt = 0
         while (true) {
             attempt++
             try {
-                val raw = send(method, url, body, headers, callId)
+                val raw = send(method, url, body, headers, callId, contentType)
                 val code = businessErrorCode(raw)
                 if (code.isNotBlank()) throw CloudException("$callId 返回错误码 $code", errorCode = code)
                 return raw
@@ -108,6 +119,7 @@ internal class CloudHttp(
         body: String?,
         headers: Map<String, String>,
         callId: String,
+        contentType: String = "text/plain;charset=UTF-8",
     ): String {
         // gate 覆盖「等间隔 + 发请求 + 读响应」全过程：慢请求不会与后续请求重叠（进程内单飞）。
         gate.withLock {
@@ -125,7 +137,7 @@ internal class CloudHttp(
                 conn.setRequestProperty("Accept", "application/json, text/plain, */*")
                 headers.forEach { (k, v) -> conn.setRequestProperty(k, v) }
                 if (body != null) {
-                    conn.setRequestProperty("Content-Type", "text/plain;charset=UTF-8")
+                    conn.setRequestProperty("Content-Type", contentType)
                     conn.doOutput = true
                     conn.outputStream.use { it.write(body.toByteArray()) }
                 }

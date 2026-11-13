@@ -1,6 +1,8 @@
 package com.chrisz.nikconnect.ui
 
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -21,7 +23,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -31,14 +35,23 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
@@ -100,7 +113,16 @@ internal fun CloudAccountScreen(
         } else if (state.selected == null) {
             CameraSection(state = state, onOpen = model::openCamera, onLogout = onLogout)
         } else {
-            SlotSection(state = state, onRetry = { model.openCamera(state.selected!!) })
+            SlotSection(
+                state = state,
+                onRetry = { model.openCamera(state.selected!!) },
+                onEdit = model::beginEdit,
+                onCancelEdit = model::cancelEdit,
+                onMove = model::moveSlot,
+                onClear = model::clearSlot,
+                onSave = model::saveLayout,
+                onNoticeShown = model::consumeNotice,
+            )
         }
     }
 }
@@ -226,21 +248,40 @@ private fun CameraSection(
         state.rawSnippet?.let { RawSnippet(it) }
 
         Text(
-            "说明：云创方案占相机内的 9 个云创槽位（独立存储区），不是机身菜单的 C-1…C-9。方案由相机自己联网拉取；本页当前只做只读查看，排布写入在后续批次实现。",
+            "说明：云创方案占相机内的 9 个云创槽位（独立存储区），不是机身菜单的 C-1…C-9。方案由相机自己联网拉取；点进相机可编辑槽位排布。",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
         Spacer(Modifier.height(4.dp))
         TextButton(onClick = onLogout, modifier = Modifier.heightIn(min = 48.dp)) { Text("退出云创账号") }
-        TextButton(onClick = {}, enabled = false, modifier = Modifier.heightIn(min = 48.dp)) {
-            Text("拖拽排布与收藏：后续批次")
-        }
     }
 }
 
 @Composable
-private fun SlotSection(state: CloudAccountState, onRetry: () -> Unit) {
+private fun SlotSection(
+    state: CloudAccountState,
+    onRetry: () -> Unit,
+    onEdit: () -> Unit,
+    onCancelEdit: () -> Unit,
+    onMove: (Int, Int) -> Unit,
+    onClear: (Int) -> Unit,
+    onSave: () -> Unit,
+    onNoticeShown: () -> Unit,
+) {
+    val context = LocalContext.current
+    val editing = state.draft != null
+    val rows = state.draft ?: state.slots
+    val rowHeight = 64.dp
+    val rowHeightPx = with(LocalDensity.current) { rowHeight.toPx() }
+
+    LaunchedEffect(state.savedNotice) {
+        state.savedNotice?.let {
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            onNoticeShown()
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -248,12 +289,33 @@ private fun SlotSection(state: CloudAccountState, onRetry: () -> Unit) {
             .padding(horizontal = 20.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text(
-            "云创槽位",
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.primary,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "云创槽位",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.weight(1f),
+            )
+            if (editing) {
+                TextButton(onClick = onCancelEdit, enabled = !state.saving, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text("撤销")
+                }
+                Button(onClick = onSave, enabled = !state.saving, modifier = Modifier.heightIn(min = 48.dp)) {
+                    if (state.saving) {
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    } else {
+                        Text("保存到相机")
+                    }
+                }
+            } else {
+                TextButton(
+                    onClick = onEdit,
+                    enabled = state.slots.any { it.occupied },
+                    modifier = Modifier.heightIn(min = 48.dp),
+                ) { Text("编辑排布") }
+            }
+        }
 
         if (state.loadingSlots) {
             Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
@@ -267,15 +329,58 @@ private fun SlotSection(state: CloudAccountState, onRetry: () -> Unit) {
             TextButton(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) { Text("重试") }
         }
 
+        state.saveError?.let { Notice(it) }
         state.rawSnippet?.let { RawSnippet(it) }
 
-        state.slots.forEachIndexed { i, slot ->
+        if (editing) {
+            Text(
+                "长按拖动换位 · 点击清空该槽位 · 保存后相机联网时会重新拉取排布",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        rows.forEachIndexed { position, slot ->
+            var dragY by remember(position, editing) { mutableFloatStateOf(0f) }
+            val dragging by remember(position, editing) { derivedStateOf { dragY != 0f } }
             Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(rowHeight)
+                    .graphicsLayer { translationY = dragY }
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(
+                        if (dragging) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface,
+                    )
+                    .then(
+                        if (editing) {
+                            Modifier
+                                .pointerInput(position, rowHeightPx, rows.size) {
+                                    detectDragGesturesAfterLongPress(
+                                        onDragEnd = {
+                                            val shift = (dragY / rowHeightPx).roundToInt()
+                                            dragY = 0f
+                                            if (shift != 0) {
+                                                onMove(position, (position + shift).coerceIn(0, rows.lastIndex))
+                                            }
+                                        },
+                                        onDragCancel = { dragY = 0f },
+                                        onDrag = { change, amount ->
+                                            change.consume()
+                                            dragY += amount.y
+                                        },
+                                    )
+                                }
+                                .clickable { onClear(position) }
+                        } else {
+                            Modifier
+                        },
+                    )
+                    .padding(horizontal = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    slot.index.toString(),
+                    (position + 1).toString(),
                     modifier = Modifier.width(28.dp),
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -299,7 +404,13 @@ private fun SlotSection(state: CloudAccountState, onRetry: () -> Unit) {
                         )
                     }
                 }
-                if (slot.modifiedAt.isNotBlank()) {
+                if (editing) {
+                    Icon(
+                        Icons.Default.Menu,
+                        contentDescription = "长按拖动",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else if (slot.modifiedAt.isNotBlank()) {
                     Text(
                         slot.modifiedAt.take(10),
                         style = MaterialTheme.typography.labelSmall,
@@ -307,10 +418,13 @@ private fun SlotSection(state: CloudAccountState, onRetry: () -> Unit) {
                     )
                 }
             }
-            if (i != state.slots.lastIndex) {
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
-            }
         }
+
+        Text(
+            "说明：云创方案占相机内的 9 个云创槽位（独立存储区），不是机身菜单的 C-1…C-9。排布提交到账号后，相机联网时会自己拉取；App 不代理方案文件。",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

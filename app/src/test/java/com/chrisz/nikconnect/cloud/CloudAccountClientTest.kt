@@ -171,4 +171,36 @@ class CloudAccountClientTest {
         assertEquals("Zf", camera.name)
         assertEquals("8032632", camera.serial)
     }
+
+    // ---- 排布写回（IF_IR_R_C004） ----
+
+    @Test
+    fun `slot body sends slotNo and recipeId sorted`() {
+        val body = client().buildSlotBody(
+            listOf(
+                CloudSlotAssignment(slotNo = 3, recipeId = "01JAAA"),
+                CloudSlotAssignment(slotNo = 1, recipeId = "01JCCC"),
+            ),
+        )
+        assertEquals(
+            """{"recipes":[{"slotNo":1,"recipeId":"01JCCC"},{"slotNo":3,"recipeId":"01JAAA"}]}""",
+            body,
+        )
+    }
+
+    @Test
+    fun `slot body skips blank recipe ids`() {
+        val body = client().buildSlotBody(
+            listOf(
+                CloudSlotAssignment(slotNo = 1, recipeId = ""),
+                CloudSlotAssignment(slotNo = 2, recipeId = "01JBBB"),
+            ),
+        )
+        assertEquals("""{"recipes":[{"slotNo":2,"recipeId":"01JBBB"}]}""", body)
+    }
+
+    @Test
+    fun `slot body with nothing occupied is an empty list`() {
+        assertEquals("""{"recipes":[]}""", client().buildSlotBody(emptyList()))
+    }
 }

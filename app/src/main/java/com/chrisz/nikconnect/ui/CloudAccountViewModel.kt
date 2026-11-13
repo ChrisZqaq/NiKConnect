@@ -6,6 +6,7 @@ import com.chrisz.nikconnect.cloud.CloudAccountClient
 import com.chrisz.nikconnect.cloud.CloudCamera
 import com.chrisz.nikconnect.cloud.CloudException
 import com.chrisz.nikconnect.cloud.CloudSlot
+import com.chrisz.nikconnect.cloud.CloudSlotAssignment
 import com.chrisz.nikconnect.cloud.guidCandidates
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -29,6 +30,12 @@ internal data class CloudAccountState(
     val loadingSlots: Boolean = false,
     val slotsError: String? = null,
     val assignableCount: Int? = null,
+    /** 编辑态：非 null 表示正在改排布，值为界面上看到的顺序（与服务端数据分离，取消即丢弃）。 */
+    val draft: List<CloudSlot>? = null,
+    val saving: Boolean = false,
+    val saveError: String? = null,
+    /** 保存成功的瞬时提示（UI 消费后置空）。 */
+    val savedNotice: String? = null,
     val rawSnippet: String? = null,
     /** 需要用户去网页「相机」页重新捕获账号 ID 时置 true（当前 guid 不被服务端接受）。 */
     val needsGuidRefresh: Boolean = false,
@@ -187,6 +194,78 @@ internal class CloudAccountViewModel(
         slotRequestId++
         _state.value = CloudAccountState(guid = guid ?: _state.value.guid)
         refreshCameras()
+    }
+
+    // ---- 排布编辑（0.6 批次 2：IF_IR_R_C004 写入） ----
+
+    fun beginEdit() {
+        val slots = _state.value.slots
+        if (slots.isEmpty()) return
+        _state.update { it.copy(draft = slots.sortedBy { s -> s.index }, saveError = null, savedNotice = null) }
+    }
+
+    fun cancelEdit() {
+        _state.update { it.copy(draft = null, saveError = null) }
+    }
+
+    /** 长按拖动后提交新位置：把 from 位置的方案移动到 to 位置，其余顺移。 */
+    fun moveSlot(from: Int, to: Int) {
+        val draft = _state.value.draft ?: return
+        if (from !in draft.indices || to !in draft.indices || from == to) return
+        val next = draft.toMutableList()
+        val moved = next.removeAt(from)
+        next.add(to, moved)
+        _state.update { it.copy(draft = next, saveError = null) }
+    }
+
+    /** 点击槽位：占用 → 变空；空 → 变回"空"占位（不做填充，选方案是下面的事）。 */
+    fun clearSlot(position: Int) {
+        val draft = _state.value.draft ?: return
+        if (position !in draft.indices) return
+        val slot = draft[position]
+        if (!slot.occupied) return
+        val next = draft.toMutableList()
+        next[position] = slot.copy(recipeId = null, name = "", pictureControlName = "", modifiedAt = "")
+        _state.update { it.copy(draft = next, saveError = null) }
+    }
+
+    /**
+     * 提交排布：只把**已占用**的槽位按 `{slotNo, recipeId}` 发出去（空位靠缺席表达）。
+     * 成功后重新 GET 一次，以服务端结果为准，而不是相信本地 draft。
+     */
+    fun saveLayout() {
+        val camera = _state.value.selected ?: return
+        val draft = _state.value.draft ?: return
+        if (_state.value.saving) return
+        val guid = workingGuid ?: _state.value.guid ?: return
+        val assignments = draft.mapIndexedNotNull { position, slot ->
+            val recipeId = slot.recipeId?.takeIf { it.isNotBlank() } ?: return@mapIndexedNotNull null
+            CloudSlotAssignment(slotNo = position + 1, recipeId = recipeId)
+        }
+        _state.update { it.copy(saving = true, saveError = null) }
+        viewModelScope.launch {
+            val client = CloudAccountClient(accessToken = accessToken, guid = guid)
+            try {
+                client.replaceSlots(camera.id, assignments)
+                val refreshed = client.cameraSlots(camera.id)
+                _state.update {
+                    it.copy(
+                        slots = refreshed,
+                        draft = refreshed.sortedBy { slot -> slot.index },
+                        saving = false,
+                        savedNotice = "已提交 ${assignments.size} 个槽位",
+                    )
+                }
+            } catch (e: CloudException) {
+                _state.update {
+                    it.copy(saving = false, saveError = describe(e, "IF_IR_R_C004"), rawSnippet = e.message)
+                }
+            }
+        }
+    }
+
+    fun consumeNotice() {
+        _state.update { it.copy(savedNotice = null) }
     }
 
     fun backToList() {
