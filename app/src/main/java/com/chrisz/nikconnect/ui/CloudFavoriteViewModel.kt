@@ -150,9 +150,10 @@ internal class CloudFavoriteViewModel(
      * 要一次权威 guid（`GET .../protocol/openid-connect/userinfo`），避免拼出空段 URL。
      */
     private suspend fun ensureGuid() {
-        if (accountGuid.isNotBlank()) return
-        val identity = CloudAccountClient(accessToken = accessToken, guid = "").fetchIdentity()
-        accountGuid = identity.guid
+        // 登录时抓到的 guid 可能是从 URL 里猜的（方案 ID / bookId 都是 26 位 ULID，形态一样），
+        // 拿它拼 /publicbook/ 会得到 422，所以这里每次都问一次 OIDC userinfo 拿权威值。
+        val identity = CloudAccountClient(accessToken = accessToken, guid = accountGuid).fetchIdentity()
+        if (identity.guid.isNotBlank()) accountGuid = identity.guid
     }
 
     private fun detailOf(e: Exception): String? {

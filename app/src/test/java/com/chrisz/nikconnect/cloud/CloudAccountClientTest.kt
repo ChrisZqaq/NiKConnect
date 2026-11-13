@@ -397,4 +397,37 @@ class CloudAccountClientTest {
         )
         assertEquals("""{"name":"NiKConnect"}""", client().buildBookBody("NiKConnect"))
     }
+
+    @Test
+    fun `moveSlot renumbers index so planSlotWrite sees the change`() {
+        val before = slotsOf("A", "", "B", "", "", "", "", "", "")
+        val after = moveSlot(before, 2, 0)
+
+        assertEquals("B", after[0].recipeId.orEmpty())
+        assertEquals("A", after[1].recipeId.orEmpty())
+        assertEquals(listOf(1, 2, 3), after.take(3).map { it.index })
+
+        // 只换顺序不改 index 时会被判成 noop，这正是真机上「显示排布没有变化」的根因
+        assertTrue(planSlotWrite(before, before).noop)
+
+        val plan = planSlotWrite(before, after)
+        assertFalse(plan.noop)
+        assertEquals(
+            listOf(CloudSlotAssignment(1, "B"), CloudSlotAssignment(2, "A")),
+            plan.assignments,
+        )
+    }
+
+    @Test
+    fun `moveSlot keeps empty slots and shifts them along`() {
+        val before = slotsOf("A", "", "", "B", "", "", "", "", "")
+        val after = moveSlot(before, 0, 2)
+
+        assertEquals(listOf("", "", "A", "B"), after.take(4).map { it.recipeId.orEmpty() })
+        assertEquals(listOf(3, 4), after.filter { !it.recipeId.isNullOrBlank() }.map { it.index })
+        assertEquals(
+            listOf(CloudSlotAssignment(3, "A"), CloudSlotAssignment(4, "B")),
+            planSlotWrite(before, after).assignments,
+        )
+    }
 }

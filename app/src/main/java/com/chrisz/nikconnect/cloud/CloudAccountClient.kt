@@ -259,14 +259,27 @@ internal class CloudAccountClient(
         }
 
     /** `IF_IR_R_PB002` = `POST /publicbook/{guid}`：新建一本书，返回新书 id。 */
+    /**
+     * 新建收藏夹（`IF_IR_R_PB002`）。
+     *
+     * Web 端只用 `fetch(url, {method:"POST", headers:{Authorization}, body: JSON字符串})`，
+     * 没有显式 Content-Type —— fetch 对字符串 body 默认发 `text/plain;charset=UTF-8`。
+     * 所以我们先按 text/plain 发；只有服务端回 400/422 时才补一次 `application/json`。
+     */
     suspend fun createBook(name: String): String = withContext(Dispatchers.IO) {
-        val raw = http.post(
-            "$IR_HOST/publicbook/$guid",
-            buildBookBody(name),
-            bearer,
-            "IF_IR_R_PB002",
-            contentType = "application/json",
-        )
+        val body = buildBookBody(name)
+        val raw = try {
+            http.post("$IR_HOST/publicbook/$guid", body, bearer, "IF_IR_R_PB002")
+        } catch (e: CloudException) {
+            if (e.httpStatus != 400 && e.httpStatus != 422) throw e
+            http.post(
+                "$IR_HOST/publicbook/$guid",
+                body,
+                bearer,
+                "IF_IR_R_PB002",
+                contentType = "application/json",
+            )
+        }
         parseCreatedBookId(raw)
     }
 
@@ -532,6 +545,19 @@ internal data class CloudSlotWritePlan(
  * @param before 服务端当前的槽位（含空位，`index` 即槽位号）
  * @param after  编辑后界面上的槽位（含空位）
  */
+/**
+ * 把 [list] 里第 [from] 个槽位搬到第 [to] 个位置，并按最终位置重排 1..n 的槽位号。
+ *
+ * 必须重排 `index`：`CloudSlot.index` 是服务端槽位号（PATCH 的 `slotNo`），
+ * 只交换列表顺序不改 `index` 的话，`planSlotWrite` 会认为"前后一致"而不提交。
+ */
+internal fun moveSlot(list: List<CloudSlot>, from: Int, to: Int): List<CloudSlot> {
+    if (from !in list.indices || to !in list.indices || from == to) return list
+    val next = list.toMutableList()
+    next.add(to, next.removeAt(from))
+    return next.mapIndexed { i, slot -> slot.copy(index = i + 1) }
+}
+
 internal fun planSlotWrite(before: List<CloudSlot>, after: List<CloudSlot>): CloudSlotWritePlan {
     val beforeKey = before.assignedSlots()
     val afterKey = after.assignedSlots()

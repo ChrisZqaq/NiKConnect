@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-- **版本**：0.6.12-alpha（0.6 批次 2：槽位支持 ↑↓ 逐格换位；收藏抽屉不再点完即关，失败必留痕并显示步骤/详情；JVM 91 项测试通过）
+- **版本**：0.6.13-alpha（0.6 批次 2：`moveSlot` 重排槽位号修掉「排布没有变化」；建夹改 text/plain 并 400/422 回退 JSON；收藏路径每次用 OIDC userinfo 取权威 guid；JVM 93 项测试通过）
 - **真机基线**：一加 Ace 5 Pro + Nikon Zf
 - **未关闭验证**：0.6.9 删除后位置保持、重新加回不再 400；0.6.10 收藏官方方案后能否在账号页「＋」里挑到并排进槽位（均待用户真机验证）；0.4 RAW 哈希/分块对照；0.5 遗留三项（在线刷新频控、详情参数与官网逐项对照、蜂窝网络封面流量）；0.6 只读部分的细节项（槽位号与网页端逐位对照、已占用/空位区分、可分配方案数、token 长时失效）见 [docs/acceptance/0.6.md](docs/acceptance/0.6.md)；0.6 批次 2（拖拽排布、收藏到书）未开工
 
@@ -487,6 +487,20 @@ else V().debug("newRecipeIdList length 0")   // ← 空数组根本不发请求
 - **收藏抽屉不再点完即关**：`onPick`/`onCreate` 只发起请求，抽屉保持打开；新增 `phase`（正在新建收藏夹…／正在把方案放进新收藏夹…／正在收藏…）与 `detail`（异常原文）两个状态行；成功时由通知触发 Toast 并自动关抽屉；`working` 期间列表与新建项禁用。
 - **guid 兜底**：收藏路径需要账号 guid，登录可能只抓到 token；`ensureGuid()` 在 guid 为空时先向 OIDC userinfo 取权威值，避免拼出 `/publicrecipe//` 这种空段 URL。
 - **异常兜底**：`catch (CloudException)` 改为 `catch (Exception)`，`describe()` 接受 `Throwable`，非 CloudException（如解析失败、协程取消以外的意外）也会显示成可读文案，不再静默。
+
+## 2026-11-14 · 0.6.13：槽位号重排 + 建夹内容类型 + guid 权威值
+
+真机反馈（m05774）：
+
+1. `上下移动槽位仍然显示排布没有变化，然后不起作用` —— 根因在 `CloudSlot.index`：它是服务端槽位号（PATCH 的 `slotNo`），`moveSlot` 只交换列表顺序、不重排 `index`，`planSlotWrite` 用 `assignedSlots()`（按 `index` 生成 pair）比较前后 → 永远相等 → `noop`。
+2. `新建收藏夹报错：IF_IR_R_PB002 HTTP 422` —— 两个原因叠加：① 建夹时我们显式发了 `Content-Type: application/json`，而 Web 端是裸 `fetch(url,{method:"POST",headers:{Authorization},body:JSON.stringify({name})})`，fetch 对字符串默认 `text/plain;charset=UTF-8`；② 收藏流程用的 guid 来自登录时从 URL 嗅探的值（可能是方案 ID / bookId，同为 26 位 ULID），而权威 guid 只在账号页用 `fetchIdentity()` 临时取过，没有回写到全局状态。
+
+修法：
+
+- `cloud/CloudAccountClient.kt` 新增纯函数 `internal fun moveSlot(list, from, to)`：搬移后 `mapIndexed { i, slot -> slot.copy(index = i + 1) }` 重排槽位号；`CloudAccountViewModel.moveSlot` 改调它。
+- `createBook()` 先按 `text/plain;charset=UTF-8` 发（与 Web 一致），仅当回 400/422 时补一次 `application/json`。
+- `CloudFavoriteViewModel.ensureGuid()` 改为**每次**都向 `GET .../protocol/openid-connect/userinfo` 取权威 guid（不再"有值就跳过"），彻底避开嗅探值。
+- 新增 JVM 测试 2 项：`moveSlot` 重排后 `planSlotWrite` 必须产出 `assignments`（含 `slotNo` 1/2）、空槽位搬迁后占用位置为 3/4。测试总数 93。
 
 ## 开放问题
 

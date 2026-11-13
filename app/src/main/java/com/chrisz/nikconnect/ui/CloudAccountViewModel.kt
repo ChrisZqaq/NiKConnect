@@ -5,10 +5,11 @@ import androidx.lifecycle.viewModelScope
 import com.chrisz.nikconnect.cloud.CloudAccountClient
 import com.chrisz.nikconnect.cloud.CloudCamera
 import com.chrisz.nikconnect.cloud.CloudException
-import com.chrisz.nikconnect.cloud.CloudSlot
 import com.chrisz.nikconnect.cloud.CloudRecipe
+import com.chrisz.nikconnect.cloud.CloudSlot
 import com.chrisz.nikconnect.cloud.CloudSlotAssignment
 import com.chrisz.nikconnect.cloud.guidCandidates
+import com.chrisz.nikconnect.cloud.moveSlot
 import com.chrisz.nikconnect.cloud.padSlots
 import com.chrisz.nikconnect.cloud.planSlotWrite
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -283,10 +284,8 @@ internal class CloudAccountViewModel(
     /** 长按拖动后提交新位置：把 from 位置的方案移动到 to 位置，其余顺移。 */
     fun moveSlot(from: Int, to: Int) {
         val draft = _state.value.draft ?: return
-        if (from !in draft.indices || to !in draft.indices || from == to) return
-        val next = draft.toMutableList()
-        val moved = next.removeAt(from)
-        next.add(to, moved)
+        val next = moveSlot(draft, from, to)
+        if (next === draft) return
         _state.update { it.copy(draft = next, saveError = null) }
     }
 
