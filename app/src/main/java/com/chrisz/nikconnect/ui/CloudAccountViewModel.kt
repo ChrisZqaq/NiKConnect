@@ -2,6 +2,7 @@ package com.chrisz.nikconnect.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.chrisz.nikconnect.cloud.CloudAccountApi
 import com.chrisz.nikconnect.cloud.CloudAccountClient
 import com.chrisz.nikconnect.cloud.CloudCamera
 import com.chrisz.nikconnect.cloud.CloudException
@@ -68,6 +69,10 @@ internal class CloudAccountViewModel(
     refreshToken: String? = null,
     /** 自动续期成功时把新凭据交回上层（MainViewModel 会写进 Keystore）。 */
     private val onTokenRefreshed: (CloudAuthState) -> Unit = {},
+    /** 测试注入点：纯 JVM 测试用它塞假客户端，避免连网。 */
+    private val clientFactory: (String, String) -> CloudAccountApi = { token, guid ->
+        CloudAccountClient(accessToken = token, guid = guid)
+    },
 ) : ViewModel() {
     /** token 会被重新登录替换：不能做成构造时不可变的字段，否则同 guid 换号后还在用旧凭据。 */
     private var accessToken: String = token
@@ -102,7 +107,7 @@ internal class CloudAccountViewModel(
         if (_state.value.loadingCameras && !force) return
         _state.update { it.copy(loadingCameras = true, cameraError = null, rawSnippet = null) }
         viewModelScope.launch {
-            val probe = CloudAccountClient(accessToken = accessToken, guid = _state.value.guid.orEmpty())
+            val probe = clientFactory(accessToken, _state.value.guid.orEmpty())
             var resolved: String? = null
             var identityError: CloudException? = null
             try {
@@ -155,7 +160,7 @@ internal class CloudAccountViewModel(
 
             var lastError: CloudException? = null
             for (guid in candidates) {
-                val client = CloudAccountClient(accessToken = accessToken, guid = guid)
+                val client = clientFactory(accessToken, guid)
                 try {
                     val cameras = client.listCameras()
                     workingGuid = guid
@@ -198,7 +203,7 @@ internal class CloudAccountViewModel(
         val requestId = ++slotRequestId
         _state.update { it.copy(selected = camera, slots = emptyList(), slotsError = null, loadingSlots = true) }
         viewModelScope.launch {
-            val client = CloudAccountClient(accessToken = accessToken, guid = guid)
+            val client = clientFactory(accessToken, guid)
             try {
                 val slots = fetchSlots(client, camera.id)
                 // 迟到结果保护：期间切了相机/返回列表/换了账号，就丢弃这次响应
@@ -227,7 +232,7 @@ internal class CloudAccountViewModel(
     /** 用 refresh_token 换新 access_token；成功则回调上层持久化。 */
     private suspend fun tryRefreshToken(): Boolean {
         val refresh = currentRefreshToken?.takeIf { it.isNotBlank() } ?: return false
-        val client = CloudAccountClient(accessToken = accessToken, guid = _state.value.guid.orEmpty())
+        val client = clientFactory(accessToken, _state.value.guid.orEmpty())
         val renewed = runCatching { client.refreshAccessToken(refresh) }.getOrNull() ?: return false
         accessToken = renewed.first
         currentRefreshToken = renewed.second ?: refresh
@@ -262,7 +267,7 @@ internal class CloudAccountViewModel(
      * 拉账号里的收藏夹。只为"看清楚我有哪些方案、分别是几份"，不做写操作：
      * 服务端没有 `DELETE /publicbook`，删夹只能去网页端，所以这里只读。
      */
-    private fun loadLibrary(client: CloudAccountClient) {
+    private fun loadLibrary(client: CloudAccountApi) {
         if (_state.value.loadingLibrary) return
         _state.update { it.copy(loadingLibrary = true, libraryError = null) }
         viewModelScope.launch {
@@ -288,7 +293,7 @@ internal class CloudAccountViewModel(
         if (_state.value.loadingAssignable) return
         _state.update { it.copy(loadingAssignable = true, assignableError = null) }
         viewModelScope.launch {
-            val client = CloudAccountClient(accessToken = accessToken, guid = guid)
+            val client = clientFactory(accessToken, guid)
             try {
                 val assignable = client.fetchAssignable()
                 _state.update {
@@ -370,7 +375,7 @@ internal class CloudAccountViewModel(
         _state.update { it.copy(deleting = recipeId, saveError = null, rawSnippet = null) }
         val requestId = ++slotRequestId
         viewModelScope.launch {
-            val client = CloudAccountClient(accessToken = accessToken, guid = guid)
+            val client = clientFactory(accessToken, guid)
             try {
                 client.deleteSlot(camera.id, recipeId)
                 val refreshed = fetchSlots(client, camera.id)
@@ -417,7 +422,7 @@ internal class CloudAccountViewModel(
 
         _state.update { it.copy(saving = true, saveError = null) }
         viewModelScope.launch {
-            val client = CloudAccountClient(accessToken = accessToken, guid = guid)
+            val client = clientFactory(accessToken, guid)
             try {
                 // 全清空（after 为空）只能用逐条 DELETE：C004 的空数组不在契约里，服务端回 422。
                 val assignments = plan.assignments
@@ -447,7 +452,7 @@ internal class CloudAccountViewModel(
                         rawSnippet = if (plan.assignments == null) {
                             "DELETE ${plan.deletes.size} 个方案\n${e.message}"
                         } else {
-                            "请求体：${runCatching { client.buildSlotBody(plan.assignments) }.getOrDefault("?")}\n${e.message}"
+                            "请求体：${runCatching { CloudAccountClient(accessToken = accessToken, guid = _state.value.guid.orEmpty()).buildSlotBody(plan.assignments) }.getOrDefault("?")}\n${e.message}"
                         },
                     )
                 }
@@ -467,7 +472,7 @@ internal class CloudAccountViewModel(
      * 之后 PATCH 的 `slotNo` 全部错位，服务端 400。
      */
     private suspend fun fetchSlots(
-        client: CloudAccountClient,
+        client: CloudAccountApi,
         cameraId: String,
     ): List<CloudSlot> {
         val assignable = runCatching { client.fetchAssignable() }.getOrNull()
@@ -488,7 +493,7 @@ internal class CloudAccountViewModel(
         _state.update { it.copy(selected = null, slots = emptyList(), slotsError = null, loadingSlots = false) }
     }
 
-    private fun loadAssignableCount(client: CloudAccountClient) {
+    private fun loadAssignableCount(client: CloudAccountApi) {
         viewModelScope.launch {
             runCatching { client.fetchAssignable().recipes.size }
                 .onSuccess { count -> _state.update { it.copy(assignableCount = count) } }

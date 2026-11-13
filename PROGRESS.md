@@ -542,6 +542,17 @@ else V().debug("newRecipeIdList length 0")   // ← 空数组根本不发请求
 - 验证：106 项 JVM 测试 0 失败（+3 token 解析、+1 sub 反例），lint 0 error / 6 warning；0.6.18 / vc 26，APK SHA-256 `86564e001ecb3c7d7d3b551fae8173fef0a1a8edfddc23255c6cf77099dd5dfa`，已装真机。
 - **未验证**：`REFRESH_PROBE_JS` 能否真读到 `refreshToken`（尼康 Web 端把 keycloak 实例放在 React 上下文里也不排除），需要用户重登一次才能观察 `OIDC_REFRESH -> 200`；收藏链路（PB002/PR001）与 9 位全清空同样卡在登录态。
 
+## 2026-11-14 · 0.6.19 / 0.6.20：WebView 登录"点了没反应"的根因
+
+- **真机现象**（用户）：点「登录」后页面一直刷新，回不到登录成功状态。
+- **定位手段**：给 `CloudLoginScreen` 的 `WebViewClient` 加日志（`nav`/`page start`/`page done`/`load error`/`oidc`/`xhr`）+ `WebView.setWebContentsDebuggingEnabled(true)`（debug 包可连 chrome://inspect）。
+- **0.6.19 日志暴露的链路**：点登录后依次跳
+  `accounts.cld.nikon.com.cn/login` → `www.accounts.cld.nikon.com.cn/nic/login` → `accounts.cld.nikon.com.cn/login/complete` → `imagingcloud.nikon.com.cn/home`，
+  即 SSO 其实走通了；但 `cookies(cloud)=…/cookies(sso)=…` 显示两边 cookie 都拿到了，页面却没有继续发带 token 的接口 → App 侧一直「没抓到 token」。
+- **0.6.20 修法**：`CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)`——登录要跨 `accounts.cld.nikon.com.cn` 与 `imagingcloud.nikon.com.cn` 两个域，WebView 默认不吃第三方 cookie，"转一圈回落地页"就是这么来的。
+- 另加 `xhr` 日志（只打 host+path+header **键名**，不打值）：用于确认云创前端到底把 token 放在 `access_token` 还是 `Authorization`，以及是否根本还没发这类请求。
+- 验证：109 项 JVM 测试 0 失败；0.6.20 / vc 28，已装真机。**待用户复测点登录**。
+
 ## 开放问题
 
 1. 真实图库规模（120 / 300 / 更大）→ 决定 0.2 分页与批量元数据优先级。

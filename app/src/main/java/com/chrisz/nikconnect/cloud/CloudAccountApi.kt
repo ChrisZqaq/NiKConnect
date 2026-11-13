@@ -14,4 +14,19 @@ internal interface CloudAccountApi {
     suspend fun favoriteRecipes(bookId: String, recipeIds: List<String>): List<String>
 
     suspend fun createBook(name: String): String
+
+    // ---- 相机与槽位（账号页用；抽到接口是为了让续期/重试逻辑能在 JVM 测试里被驱动） ----
+
+    suspend fun listCameras(): List<CloudCamera>
+
+    suspend fun cameraSlots(cameraId: String, recipeIds: List<String?>?): List<CloudSlot>
+
+    suspend fun fetchAssignable(): CloudAssignable
+
+    suspend fun replaceSlots(cameraId: String, assignments: List<CloudSlotAssignment>): String
+
+    suspend fun deleteSlot(cameraId: String, recipeId: String): String
+
+    /** 用 refresh_token 换新 access_token；换不到返回 null。 */
+    suspend fun refreshAccessToken(refreshToken: String): Pair<String, String?>?
 }

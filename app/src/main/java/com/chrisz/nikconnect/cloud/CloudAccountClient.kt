@@ -163,7 +163,7 @@ internal class CloudAccountClient(
      * `guid = e.guid`），比从请求 URL 里猜 ULID 可靠得多——账号页 422 的根因就是猜。
      */
     /** 用 refresh_token 续 access_token（Keycloak 公共客户端）；换不到返回 null。 */
-    suspend fun refreshAccessToken(refreshToken: String): Pair<String, String?>? =
+    override suspend fun refreshAccessToken(refreshToken: String): Pair<String, String?>? =
         withContext(Dispatchers.IO) { http.refreshAccessToken(refreshToken) }
 
     override suspend fun fetchIdentity(): CloudIdentity = withContext(Dispatchers.IO) {
@@ -171,7 +171,7 @@ internal class CloudAccountClient(
         parseIdentity(raw)
     }
 
-    suspend fun listCameras(): List<CloudCamera> = withContext(Dispatchers.IO) {
+    override suspend fun listCameras(): List<CloudCamera> = withContext(Dispatchers.IO) {
         val raw = http.get("$IR_HOST/camera/$guid/", bearer, "IF_IR_R_C001")
         parseCameras(raw)
     }
@@ -180,7 +180,7 @@ internal class CloudAccountClient(
      * 读槽位。`recipeIds` 来自 H13 的 `camera[].recipeIds`（真实排布，空位为 null），
      * C002 只提供方案详情，两者合成才是「第几位放了什么」。
      */
-    suspend fun cameraSlots(cameraId: String, recipeIds: List<String?>? = null): List<CloudSlot> =
+    override suspend fun cameraSlots(cameraId: String, recipeIds: List<String?>?): List<CloudSlot> =
         withContext(Dispatchers.IO) {
             val raw = http.get("$IR_HOST/camera/$guid/$cameraId", bearer, "IF_IR_R_C002")
             mergeSlots(recipeIds, parseSlots(raw))
@@ -193,7 +193,7 @@ internal class CloudAccountClient(
      * `l.map((e,s)=> e.id.startsWith("blank") ? null : {slotNo: s+1, recipeId: e.id}).filter(nonNull)`
      * 然后 `PATCH /camera/{guid}/{deviceId}` + `Content-Type: application/json`，body `{recipes:[...]}`。
      */
-    suspend fun replaceSlots(cameraId: String, assignments: List<CloudSlotAssignment>) = withContext(Dispatchers.IO) {
+    override suspend fun replaceSlots(cameraId: String, assignments: List<CloudSlotAssignment>) = withContext(Dispatchers.IO) {
         val raw = http.patch(
             "$IR_HOST/camera/$guid/$cameraId",
             buildSlotBody(assignments),
@@ -212,7 +212,7 @@ internal class CloudAccountClient(
      * Web 端删除是**逐条 DELETE**，不是靠"提交缺省的空数组"——`replaceSlots` 传空数组
      * 不在契约内（Web 端 `if (c.length)` 直接跳过 PATCH），服务端会回 422。
      */
-    suspend fun deleteSlot(cameraId: String, recipeId: String) = withContext(Dispatchers.IO) {
+    override suspend fun deleteSlot(cameraId: String, recipeId: String) = withContext(Dispatchers.IO) {
         http.request(
             method = "DELETE",
             url = "$IR_HOST/camera/$guid/$cameraId/$recipeId",
@@ -223,7 +223,7 @@ internal class CloudAccountClient(
     }
 
     /** 一次拿全：可分配池 + 每台相机的真实槽位排布（同一份 H13 响应）。 */
-    suspend fun fetchAssignable(): CloudAssignable = withContext(Dispatchers.IO) {
+    override suspend fun fetchAssignable(): CloudAssignable = withContext(Dispatchers.IO) {
         val raw = http.post(
             "$CWP_HOST/bff/recipe/camera",
             """{"country":"$country"}""",

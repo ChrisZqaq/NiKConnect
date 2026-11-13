@@ -178,6 +178,7 @@ fun CloudLoginScreen(
         if (g.isNotEmpty() && capturedGuid.isEmpty()) capturedGuid = g
         if (t.length <= 40 || capturedToken.isNotEmpty()) return
         capturedToken = t
+        runCatching { android.util.Log.d("NikConnect", "token captured: ${t.take(12)}…") }
         // 顺手把 keycloak 的 refresh_token 读出来：拿不到就照旧返回（只是少了自动续期）
         webView?.evaluateJavascript(REFRESH_PROBE_JS) { raw ->
             val refresh = raw?.trim()?.trim('"')?.takeIf { it.length > 20 && it != "null" }
@@ -222,18 +223,40 @@ fun CloudLoginScreen(
             factory = { ctx ->
                 WebView(ctx).apply {
                     settings.javaScriptEnabled = true
+                    // 允许 chrome://inspect 连上这个 WebView：登录流程出问题时能直接看控制台
+                    WebView.setWebContentsDebuggingEnabled(true)
+                    // 登录要跨 accounts.cld.nikon.com.cn ↔ imagingcloud.nikon.com.cn 两个域，
+                    // 不放第三方 cookie 时 SSO 会"转一圈回到落地页"，看起来就是点登录没反应。
+                    android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                     settings.domStorageEnabled = true
                     webView = this
                     webViewClient = object : WebViewClient() {
+                        override fun onReceivedError(
+                            view: WebView?,
+                            request: WebResourceRequest?,
+                            error: android.webkit.WebResourceError?,
+                        ) {
+                            super.onReceivedError(view, request, error)
+                            runCatching {
+                                android.util.Log.d(
+                                    "NikConnect",
+                                    "load error ${request?.url?.host} ${error?.errorCode} ${error?.description}",
+                                )
+                            }
+                        }
+
                         override fun shouldOverrideUrlLoading(
                             view: WebView?,
                             request: WebResourceRequest?,
                         ): Boolean {
                             val uri = request?.url ?: return false
+                            val navLog = "nav ${uri.host}${uri.path.orEmpty().take(60)}"
+                            runCatching { android.util.Log.d("NikConnect", navLog) }
                             val scheme = uri.scheme.orEmpty().lowercase()
                             // 自定义 scheme（含 App 自己的回调）不在 WebView 里处理，避免任意 intent 被页面触发
                             if (scheme != "https" && scheme != "http") return true
                             if (isTrustedUri(uri.toString())) return false
+                            runCatching { android.util.Log.d("NikConnect", "nav external -> browser: ${uri.host}") }
                             // 尼康域名之外的链接交给系统浏览器，不在承载登录态的 WebView 里打开
                             runCatching {
                                 context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri))
@@ -250,6 +273,18 @@ fun CloudLoginScreen(
                             val url = request?.url?.toString().orEmpty()
                             // 非尼康域名的请求一律不参与凭据捕获（防第三方页面塞 token/guid）
                             if (!isTrustedUri(url)) return null
+                            if (url.contains("/protocol/openid-connect/token") || url.contains("/protocol/openid-connect/auth")) {
+                                runCatching { android.util.Log.d("NikConnect", "oidc ${url.take(120)}") }
+                            }
+                            if (url.contains("api.user.")) {
+                                // 只打 key 不打 value：token 不能进日志
+                                runCatching {
+                                    android.util.Log.d(
+                                        "NikConnect",
+                                        "xhr ${request?.url?.host}${request?.url?.path?.take(40)} keys=${headers?.keys?.joinToString(",")}",
+                                    )
+                                }
+                            }
                             val token = tokenFromHeaders(headers)
                             if (token != null) {
                                 val guid = guidFromHeaders(headers) ?: guidFromUrl(url)
@@ -264,12 +299,27 @@ fun CloudLoginScreen(
 
                         override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                             super.onPageStarted(view, url, favicon)
+                            runCatching {
+                                android.util.Log.d(
+                                    "NikConnect",
+                                    "page start ${url?.let { java.net.URI(it).host }}${url?.let { java.net.URI(it).path }?.take(70)}",
+                                )
+                            }
                             val direct = url?.takeIf(::isTrustedUri)?.let(::tokenFromUrl)
                             if (direct != null) view?.post { acceptToken(direct, null) }
                         }
 
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
+                            runCatching {
+                                val cookies = android.webkit.CookieManager.getInstance()
+                                val cloud = cookies.getCookie("https://imagingcloud.nikon.com.cn").orEmpty()
+                                val sso = cookies.getCookie("https://accounts.cld.nikon.com.cn").orEmpty()
+                                android.util.Log.d(
+                                    "NikConnect",
+                                    "page done ${url?.take(90)} cookies(cloud)=${cloud.length} cookies(sso)=${sso.length}",
+                                )
+                            }
                             // 兼容 token 落在 localStorage 的情况
                             view?.evaluateJavascript(TOKEN_EXTRACT_JS) { value ->
                                 val raw = value?.trim('"', ' ', '|').orEmpty()

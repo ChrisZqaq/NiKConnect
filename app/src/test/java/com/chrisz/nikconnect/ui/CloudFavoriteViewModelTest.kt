@@ -1,6 +1,10 @@
 package com.chrisz.nikconnect.ui
 
 import com.chrisz.nikconnect.cloud.CloudAccountApi
+import com.chrisz.nikconnect.cloud.CloudAssignable
+import com.chrisz.nikconnect.cloud.CloudCamera
+import com.chrisz.nikconnect.cloud.CloudSlot
+import com.chrisz.nikconnect.cloud.CloudSlotAssignment
 import com.chrisz.nikconnect.cloud.CloudBook
 import com.chrisz.nikconnect.cloud.CloudException
 import com.chrisz.nikconnect.cloud.CloudIdentity
@@ -72,6 +76,20 @@ class CloudFavoriteViewModelTest {
             createdBookName = name
             return createBookResult
         }
+
+        // 收藏流程不碰槽位：这些方法只为满足接口
+        override suspend fun listCameras(): List<CloudCamera> = emptyList()
+
+        override suspend fun cameraSlots(cameraId: String, recipeIds: List<String?>?): List<CloudSlot> =
+            emptyList()
+
+        override suspend fun fetchAssignable(): CloudAssignable = CloudAssignable(emptyList())
+
+        override suspend fun replaceSlots(cameraId: String, assignments: List<CloudSlotAssignment>): String = ""
+
+        override suspend fun deleteSlot(cameraId: String, recipeId: String): String = ""
+
+        override suspend fun refreshAccessToken(refreshToken: String): Pair<String, String?>? = null
     }
 
     /** 记录每次创建 api 时传入的 guid，用来验证"权威 guid 是否被用上"。 */
