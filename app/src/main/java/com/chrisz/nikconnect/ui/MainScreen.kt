@@ -169,6 +169,7 @@ private fun NiKConnectContent(
                     cloudGuid = state.cloudGuid,
                     onLogin = onCloudLogin,
                     onLogout = onCloudLogout,
+                    cloudRefreshToken = state.cloudRefreshToken,
                 )
                 // 传输页与连接状态解耦：断线后仍可查看结果、失败原因与重试入口
                 state.selectedTab == 1 -> TransferScreen(state, onRetryDownload, onCancelDownload)

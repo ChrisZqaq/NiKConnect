@@ -121,7 +121,34 @@ private fun tokenFromUrl(url: String): String? {
 data class CloudAuthState(
     val token: String? = null,
     val guid: String? = null,
+    /** Keycloak 的 refresh_token：有了它 access_token 过期能自动续，不用用户再点登录。 */
+    val refreshToken: String? = null,
 )
+
+/**
+ * 读 keycloak-js 的 refresh_token。
+ *
+ * 尼康云创的 Web 端用标准 keycloak-js（`_app-*.js` 里有 `refreshToken=I`、`onTokenExpired`），
+ * 实例挂在页面上下文里。不同构建挂的位置不一样，这里把常见位置都试一遍；
+ * 都取不到就返回空，不影响登录主流程。
+ */
+private val REFRESH_PROBE_JS = """
+(function(){
+  try{
+    var k = window.keycloak || window.__keycloak || window.kc || (window.__NEXT_DATA__ && window.__NEXT_DATA__.keycloak);
+    if (k && k.refreshToken) return k.refreshToken;
+  }catch(e){}
+  try{
+    for (var p in window){
+      try{
+        var v = window[p];
+        if (v && typeof v === 'object' && typeof v.refreshToken === 'string' && v.refreshToken.length > 20) return v.refreshToken;
+      }catch(e){}
+    }
+  }catch(e){}
+  return '';
+})()
+""".trimIndent()
 
 /**
  * Nikon ID 登录页：一个 WebView，登录成功自动返回。
@@ -151,8 +178,18 @@ fun CloudLoginScreen(
         if (g.isNotEmpty() && capturedGuid.isEmpty()) capturedGuid = g
         if (t.length <= 40 || capturedToken.isNotEmpty()) return
         capturedToken = t
-        completed = true
-        onDone(CloudAuthState(token = t, guid = g.ifBlank { null }))
+        // 顺手把 keycloak 的 refresh_token 读出来：拿不到就照旧返回（只是少了自动续期）
+        webView?.evaluateJavascript(REFRESH_PROBE_JS) { raw ->
+            val refresh = raw?.trim()?.trim('"')?.takeIf { it.length > 20 && it != "null" }
+            webView?.post {
+                if (completed) return@post
+                completed = true
+                onDone(CloudAuthState(token = t, guid = g.ifBlank { null }, refreshToken = refresh))
+            }
+        } ?: run {
+            completed = true
+            onDone(CloudAuthState(token = t, guid = g.ifBlank { null }))
+        }
     }
 
     // 25 秒还没抓到：给一句可操作的提示，而不是让用户对着白屏等

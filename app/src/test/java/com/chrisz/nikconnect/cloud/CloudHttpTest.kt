@@ -1,6 +1,7 @@
 package com.chrisz.nikconnect.cloud
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 /**
@@ -41,5 +42,29 @@ class CloudHttpTest {
     @Test
     fun `shared instance is reused`() {
         assertEquals(CloudHttp.shared, CloudHttp.shared)
+    }
+
+    // ---- refresh_token 交换（OIDC token 端点） ----
+
+    @Test
+    fun `token response yields access and refresh`() {
+        val raw = """{"access_token":"a-1","expires_in":300,"refresh_token":"r-1","token_type":"Bearer"}"""
+        val pair = parseTokenResponse(raw)!!
+        assertEquals("a-1", pair.first)
+        assertEquals("r-1", pair.second)
+    }
+
+    @Test
+    fun `token response without refresh keeps access`() {
+        val raw = """{"access_token":"a-2","expires_in":300}"""
+        val pair = parseTokenResponse(raw)!!
+        assertEquals("a-2", pair.first)
+        assertNull(pair.second)
+    }
+
+    @Test
+    fun `token error response is not a success`() {
+        assertNull(parseTokenResponse("""{"error":"invalid_grant","error_description":"Token is not active"}"""))
+        assertNull(parseTokenResponse("<html>oops</html>"))
     }
 }

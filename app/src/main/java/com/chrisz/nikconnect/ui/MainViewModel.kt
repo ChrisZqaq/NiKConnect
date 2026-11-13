@@ -56,6 +56,8 @@ internal data class UiState(
     /** 尼康云创登录态：token 用 Keystore 加密后持久化（[SecureTokenStore]），guid 明文存 ui_prefs。 */
     val cloudToken: String? = null,
     val cloudGuid: String? = null,
+    /** 云创 refresh_token：access_token 过期时自动续期（存 Keystore，不明文落盘）。 */
+    val cloudRefreshToken: String? = null,
 ) {
     val downloading: Boolean get() = downloads.any { it.status == DownloadStatus.DOWNLOADING }
     val canDownload: Boolean get() = connectionStatus == ConnectionStatus.CONNECTED && !downloading
@@ -75,6 +77,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
             galleryViewTier = prefs.getInt("gallery_view_tier", 0),
             lastHost = prefs.getString("last_host", null),
             cloudToken = tokenStore.load(),
+            cloudRefreshToken = tokenStore.loadPair().second,
             cloudGuid = prefs.getString("cloud_guid", null),
         ),
     )
@@ -138,14 +141,23 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     fun onCloudLogin(state: CloudAuthState) {
         prefs.edit().remove("cloud_token").apply()
         state.guid?.let { prefs.edit().putString("cloud_guid", it).apply() }
-        state.token?.takeIf { it.isNotBlank() }?.let { tokenStore.save(it) }
-        _state.update { it.copy(cloudToken = state.token, cloudGuid = state.guid ?: it.cloudGuid) }
+        val token = state.token?.takeIf { it.isNotBlank() }
+        val refresh = state.refreshToken?.takeIf { it.isNotBlank() }
+            ?: _state.value.cloudRefreshToken
+        token?.let { tokenStore.save(it, refresh) }
+        _state.update {
+            it.copy(
+                cloudToken = token ?: it.cloudToken,
+                cloudGuid = state.guid ?: it.cloudGuid,
+                cloudRefreshToken = refresh,
+            )
+        }
     }
 
     fun cloudLogout() {
         prefs.edit().remove("cloud_token").remove("cloud_guid").apply()
         tokenStore.clear()
-        _state.update { it.copy(cloudToken = null, cloudGuid = null) }
+        _state.update { it.copy(cloudToken = null, cloudGuid = null, cloudRefreshToken = null) }
     }
 
     fun connect(manualHost: String) {
@@ -380,6 +392,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
             UiState(
                 cloudToken = it.cloudToken,
                 cloudGuid = it.cloudGuid,
+                cloudRefreshToken = it.cloudRefreshToken,
                 galleryViewTier = it.galleryViewTier,
                 selectedTab = if (it.selectedTab == 1) 0 else it.selectedTab,
             )

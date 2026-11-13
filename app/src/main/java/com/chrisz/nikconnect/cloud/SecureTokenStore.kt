@@ -5,6 +5,10 @@ import androidx.core.content.edit
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -25,19 +29,27 @@ internal class SecureTokenStore(context: Context) {
 
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    fun save(token: String) {
+    fun save(token: String, refreshToken: String? = null) {
         if (token.isBlank()) return
         runCatching {
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(Cipher.ENCRYPT_MODE, secretKey())
-            val encrypted = cipher.doFinal(token.toByteArray(Charsets.UTF_8))
+            // 明文是 JSON：老版本存的是裸 token，读取端要兼容（否则升级即掉登录）
+            val plain = buildJsonObject {
+                put("a", JsonPrimitive(token))
+                refreshToken?.takeIf { it.isNotBlank() }?.let { put("r", JsonPrimitive(it)) }
+            }.toString()
+            val encrypted = cipher.doFinal(plain.toByteArray(Charsets.UTF_8))
             val payload = cipher.iv + encrypted
             prefs.edit { putString(KEY_TOKEN, Base64.encodeToString(payload, Base64.NO_WRAP)) }
         }
     }
 
-    fun load(): String? {
-        val stored = prefs.getString(KEY_TOKEN, null) ?: return null
+    fun load(): String? = loadPair().first
+
+    /** 读 (access_token, refresh_token)；解不开或没有就返回 (null, null) 并清掉坏数据。 */
+    fun loadPair(): Pair<String?, String?> {
+        val stored = prefs.getString(KEY_TOKEN, null) ?: return null to null
         val decrypted = runCatching {
             val payload = Base64.decode(stored, Base64.NO_WRAP)
             if (payload.size <= IV_LENGTH) return@runCatching null
@@ -49,9 +61,20 @@ internal class SecureTokenStore(context: Context) {
         }.getOrNull()
         if (decrypted.isNullOrBlank()) {
             clear()
-            return null
+            return null to null
         }
-        return decrypted
+        val element = runCatching { Json.parseToJsonElement(decrypted) }.getOrNull() as? JsonObject
+        if (element == null) {
+            // 0.6.14 存的是裸 token
+            return decrypted to null
+        }
+        val access = element.str("a")?.takeIf { it.isNotBlank() }
+        val refresh = element.str("r")?.takeIf { it.isNotBlank() }
+        if (access == null) {
+            clear()
+            return null to null
+        }
+        return access to refresh
     }
 
     fun clear() {

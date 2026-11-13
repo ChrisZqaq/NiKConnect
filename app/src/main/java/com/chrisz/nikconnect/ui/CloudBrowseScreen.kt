@@ -89,6 +89,7 @@ internal fun CloudTab(
     cloudGuid: String?,
     onLogin: (CloudAuthState) -> Unit,
     onLogout: () -> Unit,
+    cloudRefreshToken: String? = null,
 ) {
     val model: CloudCatalogViewModel = viewModel()
     val catalog by model.state.collectAsStateWithLifecycle()
@@ -113,6 +114,12 @@ internal fun CloudTab(
                 showAccount = false
                 loginStartUrl = CLOUD_INDEX_URL
             },
+            onRelogin = {
+                showAccount = false
+                loginStartUrl = CLOUD_INDEX_URL
+            },
+            refreshToken = cloudRefreshToken,
+            onTokenRefreshed = onLogin,
         )
         return
     }

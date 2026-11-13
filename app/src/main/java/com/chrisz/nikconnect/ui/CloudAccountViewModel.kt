@@ -56,6 +56,8 @@ internal data class CloudAccountState(
     val rawSnippet: String? = null,
     /** 需要用户去网页「相机」页重新捕获账号 ID 时置 true（当前 guid 不被服务端接受）。 */
     val needsGuidRefresh: Boolean = false,
+    /** 登录态已过期（userinfo 401/403）：需要用户重新登录，不是账号 ID 的问题。 */
+    val sessionExpired: Boolean = false,
 ) {
     val hasCredentials: Boolean get() = !guid.isNullOrBlank()
 }
@@ -63,9 +65,18 @@ internal data class CloudAccountState(
 internal class CloudAccountViewModel(
     token: String,
     guid: String?,
+    refreshToken: String? = null,
+    /** 自动续期成功时把新凭据交回上层（MainViewModel 会写进 Keystore）。 */
+    private val onTokenRefreshed: (CloudAuthState) -> Unit = {},
 ) : ViewModel() {
     /** token 会被重新登录替换：不能做成构造时不可变的字段，否则同 guid 换号后还在用旧凭据。 */
     private var accessToken: String = token
+
+    /** refresh_token 只在本 VM 内用于续期，不参与任何请求头。 */
+    private var currentRefreshToken: String? = refreshToken
+
+    /** 401 只自动续一次，避免在 refresh_token 也失效时无限重试。 */
+    private var refreshAttempted = false
 
     /** 槽位请求代次：切换相机/返回列表/重登都会让旧响应失效。 */
     private var slotRequestId = 0
@@ -87,8 +98,8 @@ internal class CloudAccountViewModel(
      * `keycloak.loadUserInfo()` 返回的 `guid`。从 URL 嗅探 ULID 会抓到方案 ID／bookId，
      * 带错 guid 请求 `IF_IR_R_C001` 时网关返回 422。
      */
-    fun refreshCameras() {
-        if (_state.value.loadingCameras) return
+    fun refreshCameras(force: Boolean = false) {
+        if (_state.value.loadingCameras && !force) return
         _state.update { it.copy(loadingCameras = true, cameraError = null, rawSnippet = null) }
         viewModelScope.launch {
             val probe = CloudAccountClient(accessToken = accessToken, guid = _state.value.guid.orEmpty())
@@ -100,14 +111,24 @@ internal class CloudAccountViewModel(
                 identityError = e
             }
 
+            // 401/403 先尝试用 refresh_token 静默续期，续不上再让用户重登
+            if (resolved == null && identityError?.httpStatus in setOf(401, 403) && !refreshAttempted) {
+                refreshAttempted = true
+                if (tryRefreshToken()) {
+                    refreshCameras(force = true)
+                    return@launch
+                }
+            }
+
             // token 失效是确定性结论，别再拿错 guid 去撞 422 把用户绕晕
             if (resolved == null && identityError?.httpStatus in setOf(401, 403)) {
                 _state.update {
                     it.copy(
                         loadingCameras = false,
-                        cameraError = "登录态已失效（HTTP ${identityError?.httpStatus}）。点右上角退出后重新登录云创。",
+                        cameraError = "登录态已失效（HTTP ${identityError?.httpStatus}）。点下面的「重新登录云创」即可，不用退出账号。",
                         rawSnippet = identityError?.message,
                         needsGuidRefresh = false,
+                        sessionExpired = true,
                     )
                 }
                 return@launch
@@ -203,12 +224,32 @@ internal class CloudAccountViewModel(
         }
     }
 
+    /** 用 refresh_token 换新 access_token；成功则回调上层持久化。 */
+    private suspend fun tryRefreshToken(): Boolean {
+        val refresh = currentRefreshToken?.takeIf { it.isNotBlank() } ?: return false
+        val client = CloudAccountClient(accessToken = accessToken, guid = _state.value.guid.orEmpty())
+        val renewed = runCatching { client.refreshAccessToken(refresh) }.getOrNull() ?: return false
+        accessToken = renewed.first
+        currentRefreshToken = renewed.second ?: refresh
+        _state.update { it.copy(sessionExpired = false, cameraError = null) }
+        onTokenRefreshed(
+            CloudAuthState(
+                token = accessToken,
+                guid = _state.value.guid,
+                refreshToken = currentRefreshToken,
+            ),
+        )
+        return true
+    }
+
     /** 重新登录后调用：token 变了就丢掉旧数据重新拉，旧响应因代次变化自动失效。 */
-    fun updateCredentials(token: String?, guid: String?) {
+    fun updateCredentials(token: String?, guid: String?, refreshToken: String? = null) {
         val next = token?.trim().orEmpty()
         val guidChanged = guid != null && guid != _state.value.guid
         if (next.isEmpty() || (next == accessToken && !guidChanged)) return
         accessToken = next
+        refreshToken?.takeIf { it.isNotBlank() }?.let { currentRefreshToken = it }
+        refreshAttempted = false
         workingGuid = guid?.takeIf { it.isNotBlank() }
         slotRequestId++
         _state.value = CloudAccountState(guid = guid ?: _state.value.guid)

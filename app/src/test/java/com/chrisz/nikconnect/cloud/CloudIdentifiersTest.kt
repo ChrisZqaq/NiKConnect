@@ -2,6 +2,7 @@ package com.chrisz.nikconnect.cloud
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -74,5 +75,14 @@ class CloudIdentifiersTest {
         assertNull(guidFromUrl("https://imagingcloud.nikon.com.cn/recipe/index/"))
         assertNull(guidFromUrl(""))
         assertNull(guidFromUrl(null))
+    }
+
+    @Test
+    fun `jwt sub uuid is not treated as account guid`() {
+        // Keycloak 的 sub 是用户 UUID，不是云创账号 ID；拿它请求 C001 只会 422
+        val payload = java.util.Base64.getUrlEncoder().withoutPadding()
+            .encodeToString("""{"sub":"f107dda0-3bd2-4e48-af7a-79b77d9a908b","preferred_username":"x"}""".toByteArray())
+        assertNull(guidFromJwt("h.$payload.s"))
+        assertTrue(guidCandidates("h.$payload.s", null).isEmpty())
     }
 }

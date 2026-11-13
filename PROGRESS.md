@@ -525,6 +525,23 @@ else V().debug("newRecipeIdList length 0")   // ← 空数组根本不发请求
 - 测试 99 → 102；顺手把 `SecureTokenStore` 的 `SharedPreferences.edit` 换成 KTX 扩展，lint 回到 0 error / 6 warning（全是既有项）。
 - 版本 `0.6.16-alpha`（vc 24），APK SHA-256 `f78b114130bc94572f938310e30e428b73fd898da4246eeba77cb5a54300ce1e`。
 
+## 2026-11-14 · 0.6.17 / 0.6.18：token 会过期这件事 + 静默续期
+
+**真机发现（关键）**：`adb install -r` 装完重进，`OIDC_USERINFO` 直接 `401 invalid_token` —— 0.6.14 的「Keystore 持久化」只保证 token 还在，不保证它**有效**。尼康云创的 Keycloak access_token 有效期只有几十分钟，"免重登"在时限内成立，过期后必须重登。
+
+- **0.6.17 三处修正**
+  - `cloud/CloudIdentifiers.kt:guidFromJwt` 删除 `sub` claim 与「长度 8..64」兜底：Keycloak 的 `sub` 是用户 UUID（`f107dda0-3bd2-…`），**不是**云创账号 ID（`0000000000062160`），拿它请求 C001 只会 422，还会被当账号 ID 显示出来（真机截图踩到）。新增测试 `jwt sub uuid is not treated as account guid`。
+  - `ui/CloudAccountViewModel.kt` 新增 `sessionExpired`：userinfo 401/403 → 「登录态已失效（HTTP 401）。点下面的「重新登录云创」即可，不用退出账号。」
+  - `ui/CloudAccountScreen.kt` 加一枚 48dp「重新登录云创」按钮（副标「access_token 只有几十分钟，过点一次即可续上」），省掉"滚到底找退出"。
+- **0.6.18 静默续期**
+  - `cloud/SecureTokenStore.kt` 明文载荷改成 JSON `{"a":access,"r":refresh}`（老版本裸 token 仍能读，升级不掉登录）；新增 `loadPair()`。
+  - `ui/CloudLoginScreen.kt` 新增 `REFRESH_PROBE_JS`：抓到 access_token 后 `evaluateJavascript` 读 `keycloak.refreshToken`（依次试 `window.keycloak`/`__keycloak`/`kc`/`__NEXT_DATA__.keycloak` 与全 `window` 对象扫描），交回 `CloudAuthState.refreshToken`。
+  - `cloud/CloudHttp.kt` 新增 `refreshAccessToken(refreshToken)`：`POST {auth}/protocol/openid-connect/token`（`grant_type=refresh_token&client_id=c0004`，`application/x-www-form-urlencoded`）+ 纯函数 `parseTokenResponse`。
+  - `ui/CloudAccountViewModel.kt`：userinfo 401/403 时先 `tryRefreshToken()`（只试一次），成功后重跑 `refreshCameras(force = true)` 并把新凭据经 `onTokenRefreshed` 交回 `MainViewModel` 写 Keystore。
+  - 管道：`MainViewModel.cloudRefreshToken`（UiState + 启动读 Keystore）→ `MainScreen` → `CloudTab(cloudRefreshToken)` → `CloudAccountScreen(refreshToken, onTokenRefreshed)`。
+- 验证：106 项 JVM 测试 0 失败（+3 token 解析、+1 sub 反例），lint 0 error / 6 warning；0.6.18 / vc 26，APK SHA-256 `86564e001ecb3c7d7d3b551fae8173fef0a1a8edfddc23255c6cf77099dd5dfa`，已装真机。
+- **未验证**：`REFRESH_PROBE_JS` 能否真读到 `refreshToken`（尼康 Web 端把 keycloak 实例放在 React 上下文里也不排除），需要用户重登一次才能观察 `OIDC_REFRESH -> 200`；收藏链路（PB002/PR001）与 9 位全清空同样卡在登录态。
+
 ## 开放问题
 
 1. 真实图库规模（120 / 300 / 更大）→ 决定 0.2 分页与批量元数据优先级。

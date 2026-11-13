@@ -162,6 +162,10 @@ internal class CloudAccountClient(
      * 这是 Web 端拿 `guid` 的原路径（`_app` chunk：`keycloak.loadUserInfo()` 之后
      * `guid = e.guid`），比从请求 URL 里猜 ULID 可靠得多——账号页 422 的根因就是猜。
      */
+    /** 用 refresh_token 续 access_token（Keycloak 公共客户端）；换不到返回 null。 */
+    suspend fun refreshAccessToken(refreshToken: String): Pair<String, String?>? =
+        withContext(Dispatchers.IO) { http.refreshAccessToken(refreshToken) }
+
     override suspend fun fetchIdentity(): CloudIdentity = withContext(Dispatchers.IO) {
         val raw = http.get("$AUTH_HOST/protocol/openid-connect/userinfo", bearer, "OIDC_USERINFO")
         parseIdentity(raw)

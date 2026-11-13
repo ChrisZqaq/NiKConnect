@@ -21,6 +21,9 @@ internal const val CWP_HOST = "https://api.user.cwp.imagingcloud.nikon.com.cn"
  */
 internal const val AUTH_HOST = "https://auth.accounts.cld.nikon.com.cn/auth/realms/user"
 
+/** Keycloak 公共客户端 id（来自 `https://imagingcloud.nikon.com.cn/json/keycloak_Prod.json` 的 resource）。 */
+internal const val CLOUD_CLIENT_ID = "c0004"
+
 internal const val IR_HOST = "https://api.user.ir.imagingcloud.nikon.com.cn"
 internal const val CLOUD_ORIGIN = "https://imagingcloud.nikon.com.cn"
 /** 云创网页入口（方案库首页）。 */
@@ -191,6 +194,32 @@ internal class CloudHttp(
         return obj
     }
 
+    /**
+     * 用 refresh_token 换新的 access_token（Keycloak 公共客户端，表单提交）。
+     *
+     * 为什么必须有：尼康云创的 access_token 只有几十分钟，光把它放进 Keystore 只能做到
+     * 「几十分钟内不用重登」。refresh_token 是天级有效期，续上之后才算真正的免重登。
+     * 换不到（refresh_token 过期/被吊销）返回 null，由调用方引导用户重登。
+     */
+    suspend fun refreshAccessToken(refreshToken: String): Pair<String, String?>? {
+        if (refreshToken.isBlank()) return null
+        val form = buildString {
+            append("grant_type=refresh_token")
+            append("&client_id=").append(CLOUD_CLIENT_ID)
+            append("&refresh_token=").append(java.net.URLEncoder.encode(refreshToken, "UTF-8"))
+        }
+        val raw = runCatching {
+            send(
+                "POST",
+                "$AUTH_HOST/protocol/openid-connect/token",
+                form,
+                mapOf("Content-Type" to "application/x-www-form-urlencoded"),
+                "OIDC_REFRESH",
+            )
+        }.getOrNull() ?: return null
+        return parseTokenResponse(raw)
+    }
+
     fun parseElement(raw: String, callId: String = ""): JsonElement {
         val element = try {
             json.parseToJsonElement(raw)
@@ -254,4 +283,18 @@ internal class CloudHttp(
         /** 进程内共享实例：限速与退避是账号/IP 维度的，多个客户端各建一份等于没限速。 */
         internal val shared: CloudHttp by lazy { CloudHttp() }
     }
+}
+
+/**
+ * `POST {auth}/protocol/openid-connect/token` 的响应解析（纯函数，便于单测）。
+ *
+ * 尼康云创是标准 Keycloak 公共客户端（`resource=c0004`）：
+ * `grant_type=refresh_token` 成功时返回 `access_token` / `refresh_token` / `expires_in`。
+ */
+internal fun parseTokenResponse(raw: String): Pair<String, String?>? {
+    val element = runCatching { Json.parseToJsonElement(raw) }.getOrNull() as? JsonObject ?: return null
+    val access = element.str("access_token")?.trim().orEmpty()
+    if (access.isBlank()) return null
+    val refresh = element.str("refresh_token")?.trim()?.takeIf { it.isNotBlank() }
+    return access to refresh
 }

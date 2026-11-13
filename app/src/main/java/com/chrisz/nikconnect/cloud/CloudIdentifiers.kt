@@ -55,10 +55,13 @@ internal fun guidFromJwt(token: String?): String? {
         )
     }.getOrNull() ?: return null
     val claims = runCatching { JSONObject(decoded) }.getOrNull() ?: return null
-    val values = listOf("guid", "userGuid", "user_guid", "userId", "user_id", "uid", "sub")
+    // 只认明确的账号 ID claim。
+    // `sub` 是 Keycloak 的用户 UUID（如 `f107dda0-3bd2-…`），**不是**云创账号 guid
+    // （`0000000000062160`），拿它去请求 C001 只会得到 422，还会被当成账号 ID 显示出来。
+    val values = listOf("guid", "userGuid", "user_guid", "userId", "user_id", "uid")
         .map { claims.optString(it).trim() }
         .filter { it.isNotEmpty() }
-    return values.firstOrNull(::isGuidLike) ?: values.firstOrNull { it.length in 8..64 }
+    return values.firstOrNull(::isGuidLike)
 }
 
 /** 依次尝试的 guid 候选：抓取到的值优先，其次 token 自带的 claim。 */

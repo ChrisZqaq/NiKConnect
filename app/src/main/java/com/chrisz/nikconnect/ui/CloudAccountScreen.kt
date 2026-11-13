@@ -80,10 +80,20 @@ internal fun CloudAccountScreen(
     onBack: () -> Unit,
     onLogout: () -> Unit,
     onRecaptureGuid: () -> Unit,
+    onRelogin: () -> Unit,
+    refreshToken: String? = null,
+    onTokenRefreshed: (CloudAuthState) -> Unit = {},
 ) {
     BackHandler(onBack = onBack)
     val factory = viewModelFactory {
-        initializer { CloudAccountViewModel(token = token, guid = guid) }
+        initializer {
+            CloudAccountViewModel(
+                token = token,
+                guid = guid,
+                refreshToken = refreshToken,
+                onTokenRefreshed = onTokenRefreshed,
+            )
+        }
     }
     val model: CloudAccountViewModel = viewModel(key = "cloud-account-$guid", factory = factory)
     val state by model.state.collectAsStateWithLifecycle()
@@ -118,6 +128,23 @@ internal fun CloudAccountScreen(
         state.guid?.takeIf { it.isNotBlank() }?.let { GuidLine(it) }
         if (state.needsGuidRefresh) {
             GuidRefreshBar(onRecaptureGuid)
+        }
+        if (state.sessionExpired) {
+            // 只过期、guid 没错：直接给一键重登，别让用户翻到底部找「退出」
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Button(
+                    onClick = onRelogin,
+                    modifier = Modifier.heightIn(min = 48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                ) { Text("重新登录云创") }
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    "尼康云创的 access_token 只有几十分钟，过点一次即可续上",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
         if (!state.hasCredentials) {
             Notice("没有拿到账号 ID。点右上角刷新重试；仍然失败就退出后重新登录云创。")
