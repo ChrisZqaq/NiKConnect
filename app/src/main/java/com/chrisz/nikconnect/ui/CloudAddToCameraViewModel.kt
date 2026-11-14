@@ -103,49 +103,54 @@ internal class CloudAddToCameraViewModel(
         _state.update { it.copy(working = "正在准备…", error = null) }
         viewModelScope.launch {
             runCatching {
-                withSession { api ->
-                    val localId = alreadyCollectedId ?: run {
-                        _state.update { it.copy(working = "正在加入收藏…") }
-                        api.saveToLibrary(name = recipeName, resourceId = recipeId)
-                        // LR002 只回 202，本地 id 要回 H05 按名字取
-                        api.fetchMyRecipes().recipes
-                            .firstOrNull { it.name.equals(recipeName, ignoreCase = true) }?.id
-                            ?: throw CloudException("已提交收藏，但在账号里没找到「$recipeName」")
-                    }
-                    _state.update { it.copy(working = "正在加入相机可用列表…") }
-                    api.addRecipes(camera.id, listOf(localId))
-                    _state.update { it.copy(working = "正在写入槽位…") }
-                    val layout = api.fetchAssignable().layouts[camera.id]
-                    val beforeSlots = mergeSlots(layout, emptyList())
-                    val target = position + 1
-
-                    // 已经在目标位：C003 可能已把它放进去了，不必再 PATCH。
-                    if (beforeSlots.firstOrNull { it.index == target }?.recipeId == localId) {
-                        return@withSession recipeName
-                    }
-
-                    // 目标位被别的方案占着：那是**真删除**，必须走 C005；PATCH 只表达"仍在的排布"。
-                    val occupant = beforeSlots.firstOrNull { it.index == target }
-                        ?.recipeId
-                        ?.takeIf { it.isNotBlank() }
-                    occupant?.let { api.deleteSlot(camera.id, it) }
-
-                    // 同一方案若已在别的槽位，这次只是"挪位"，PATCH 的排布里只留目标位即可，
-                    // 不需要先删再加（早先的删+加是多余且危险的）。
-                    val assignmentsAtTarget = buildAssignments(
-                        layout = beforeSlots.map { if (it.recipeId == localId) null else it.recipeId },
-                        position = position,
-                        localId = localId,
-                    )
-                    try {
-                        api.replaceSlots(camera.id, assignmentsAtTarget)
-                    } catch (e: CloudException) {
-                        // PATCH 失败时把刚删掉的方案加回去，别让相机槽位空着
-                        occupant?.let { runCatching { api.addRecipes(camera.id, listOf(it)) } }
-                        throw e
-                    }
-                    recipeName
+                // F04：**每个请求**各自具备续期重试，绝不把整段工作流包在一次 withSession 里。
+                // 否则 PATCH 那步才 401 时，「收藏 / 入池 / 删占位」会被整段重放一遍。
+                val localId = alreadyCollectedId ?: run {
+                    _state.update { it.copy(working = "正在加入收藏…") }
+                    call { it.saveToLibrary(name = recipeName, resourceId = recipeId) }
+                    // LR002 只回 202，本地 id 要回 H05 取；重名时不猜，直接停。
+                    val mine = call { it.fetchMyRecipes() }.recipes
+                    mine.filter { it.name.equals(recipeName, ignoreCase = true) }.singleOrNull()?.id
+                        ?: throw CloudException("已提交收藏，但账号里没有唯一的「$recipeName」，请到账号页核对")
                 }
+                _state.update { it.copy(working = "正在加入相机可用列表…") }
+                call { it.addRecipes(camera.id, listOf(localId)) }
+
+                _state.update { it.copy(working = "正在读取当前排布…") }
+                // F05：读不到排布就不许提交——拿"空布局"PATCH 等于告诉服务端其它槽位全清空。
+                val layout = call { it.fetchAssignable() }.layouts[camera.id]
+                    ?: throw CloudException("没读到相机当前的槽位排布，先刷新再试（不会在未知状态下提交）")
+                val beforeSlots = mergeSlots(layout, emptyList())
+                val target = position + 1
+
+                // 已经在目标位：C003 可能已把它放进去了，不必再 PATCH。
+                if (beforeSlots.firstOrNull { it.index == target }?.recipeId == localId) {
+                    return@runCatching recipeName
+                }
+
+                // 目标位被别的方案占着：那是**真删除**，必须走 C005；PATCH 只表达"仍在的排布"。
+                val occupant = beforeSlots.firstOrNull { it.index == target }
+                    ?.recipeId
+                    ?.takeIf { it.isNotBlank() }
+                occupant?.let { taken -> call { api -> api.deleteSlot(camera.id, taken) } }
+
+                // 同一方案若已在别的槽位，这次只是"挪位"：PATCH 的排布里只留目标位即可。
+                val assignmentsAtTarget = buildAssignments(
+                    layout = beforeSlots.map { if (it.recipeId == localId) null else it.recipeId },
+                    position = position,
+                    localId = localId,
+                )
+                try {
+                    _state.update { it.copy(working = "正在写入槽位…") }
+                    call { it.replaceSlots(camera.id, assignmentsAtTarget) }
+                } catch (e: CloudException) {
+                    // PATCH 失败时把刚删掉的方案加回去，别让相机槽位空着
+                    occupant?.let { taken ->
+                        runCatching { call { api -> api.addRecipes(camera.id, listOf(taken)) } }
+                    }
+                    throw e
+                }
+                recipeName
             }.onSuccess { name ->
                 _state.update {
                     it.copy(
@@ -182,6 +187,9 @@ internal class CloudAddToCameraViewModel(
             id?.takeIf { it.isNotBlank() }?.let { CloudSlotAssignment(index + 1, it) }
         }
     }
+
+    /** 单次请求 + 401 续期重试一次；只包一个 HTTP 调用，绝不包多步业务。 */
+    private suspend fun <T> call(block: suspend (CloudAccountApi) -> T): T = withSession(block)
 
     private suspend fun <T> withSession(block: suspend (CloudAccountApi) -> T): T {
         return try {

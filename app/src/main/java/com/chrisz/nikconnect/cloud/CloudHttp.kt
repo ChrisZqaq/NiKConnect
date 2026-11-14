@@ -65,6 +65,9 @@ internal class CloudHttp(
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val gate = Mutex()
+
+    /** 续期专用锁：refresh_token 会随每次续期轮换，并发续期会互相作废。 */
+    private val refreshGate = Mutex()
     private var lastRequestAt = Long.MIN_VALUE / 2
 
     suspend fun get(url: String, headers: Map<String, String>, callId: String): String =
@@ -233,8 +236,16 @@ internal class CloudHttp(
      * 「几十分钟内不用重登」。refresh_token 是天级有效期，续上之后才算真正的免重登。
      * 换不到（refresh_token 过期/被吊销）返回 null，由调用方引导用户重登。
      */
+    /**
+     * 续期是**单飞**的：Keycloak 每次续期都会轮换 refresh_token，两个请求并发续期会互相把对方的
+     * refresh_token 作废，用户表现为"刚还好好的突然要重登"（评审 F12）。
+     */
     suspend fun refreshAccessToken(refreshToken: String): Pair<String, String?>? {
         if (refreshToken.isBlank()) return null
+        return refreshGate.withLock { refreshLocked(refreshToken) }
+    }
+
+    private suspend fun refreshLocked(refreshToken: String): Pair<String, String?>? {
         val form = buildString {
             append("grant_type=refresh_token")
             append("&client_id=").append(CLOUD_CLIENT_ID)

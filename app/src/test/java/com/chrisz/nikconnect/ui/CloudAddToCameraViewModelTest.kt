@@ -215,4 +215,30 @@ class CloudAddToCameraViewModelTest {
         assertEquals(listOf(CloudSlotAssignment(2, "LOCAL-9")), api.patched)
         assertNull(model.state.value.error)
     }
+
+    @Test
+    fun addToSlot_refusesToPatchWhenLayoutIsUnknown() = runTest(dispatcher) {
+        // H13 没给这台相机的排布 → 现场状态未知，绝不能拿"空布局"去提交
+        val api = object : CloudAccountApi by FakeApi() {
+            override suspend fun fetchAssignable(): CloudAssignable =
+                CloudAssignable(recipes = emptyList(), layouts = emptyMap())
+        }
+        val model = CloudAddToCameraViewModel(
+            token = "t",
+            capturedGuid = "0000000000062160",
+            clientFactory = { _, _ -> api },
+        )
+
+        model.addToSlot(
+            camera = CloudCamera(id = "CAM1", name = "Zf", model = "", serial = ""),
+            position = 0,
+            recipeId = "01M3P67BB9NR1QMJHMQ870XW52",
+            recipeName = "Mate Film by Choi matae",
+        )
+        advanceUntilIdle()
+
+        val state = model.state.value
+        assertEquals(null, state.working)
+        assertTrue("error was: ${state.error}", state.error.orEmpty().contains("没读到相机当前的槽位排布"))
+    }
 }

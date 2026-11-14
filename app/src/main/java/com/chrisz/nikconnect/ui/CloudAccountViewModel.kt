@@ -347,15 +347,18 @@ internal class CloudAccountViewModel(
         val camera = _state.value.selected ?: return
         val draft = _state.value.draft ?: return
         if (position !in draft.indices) return
+        val requestId = ++slotRequestId
         viewModelScope.launch {
             _state.update { it.copy(loadingAssignable = true, saveError = null) }
             try {
                 val client = clientFactory(accessToken, _state.value.guid.orEmpty())
-                client.addRecipes(camera.id, listOf(recipe.id))
+                withSession { it.addRecipes(camera.id, listOf(recipe.id)) }
                 val assignable = runCatching { withSession { it.fetchAssignable() } }.getOrNull()
                 val slots = padSlots(
-                    client.cameraSlots(camera.id, assignable?.layouts?.get(camera.id)),
+                    withSession { it.cameraSlots(camera.id, assignable?.layouts?.get(camera.id)) },
                 )
+                // 代际守卫：期间换了相机或又发起了新的槽位请求，这份响应就作废。
+                if (requestId != slotRequestId || _state.value.selected?.id != camera.id) return@launch
                 _state.update { current ->
                     val currentDraft = current.draft ?: return@update current
                     if (position !in currentDraft.indices) return@update current
@@ -487,6 +490,7 @@ internal class CloudAccountViewModel(
         val callId = plan.callId
 
         _state.update { it.copy(saving = true, saveError = null) }
+        val requestId = ++slotRequestId
         viewModelScope.launch {
             val client = clientFactory(accessToken, guid)
             try {
@@ -510,6 +514,7 @@ internal class CloudAccountViewModel(
                     throw e
                 }
                 val refreshed = fetchSlots(client, camera.id)
+                if (requestId != slotRequestId || _state.value.selected?.id != camera.id) return@launch
                 _state.update {
                     it.copy(
                         slots = refreshed,

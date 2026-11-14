@@ -282,6 +282,15 @@
 
 验证：148 项 JVM 测试 0 失败（新增 `RedactSecretsTest` 4 项、`CloudFavoriteViewModelTest` 三态断言），lint 0 error / 6 warning，`assembleDebug` 通过；`0.10.0-alpha` / versionCode 51。
 
+## 2026-11-14 · 0.10.1：Astra 评审 B 批（云创一致性）
+
+- **F04 续期不再重放业务**：`ui/CloudAddToCameraViewModel.kt` 的「收藏 → H05 → C003 → C005 → C004」原本整段包在一个 `withSession{}` 里，PATCH 那步才 401 会把前面三步重做一遍。改为新增 `private suspend fun <T> call(block)`＝单请求级续期重试，每个 HTTP 调用各自独立；`addToSlot` 全链路改为逐步 `call {}`。
+- **F05 未知前态禁止提交**：`addToSlot` 现在要求 `fetchAssignable().layouts[camera.id]` 非空，取不到就抛「没读到相机当前的槽位排布，先刷新再试（不会在未知状态下提交）」，不再用 `mergeSlots(null)` 合成空布局去 PATCH（那等于告诉服务端其它槽位清空）。
+- **F12 续期单飞**：`cloud/CloudHttp.kt` 新增 `private val refreshGate = Mutex()`，`refreshAccessToken` 改为 `refreshGate.withLock { refreshLocked(refreshToken) }`——Keycloak 每次续期轮换 refresh_token，并发续期会互相作废。
+- **F14 代际守卫**：`ui/CloudAccountViewModel.kt` 的 `fillSlotFromLibrary` 与 `saveLayout` 取 `val requestId = ++slotRequestId`，应用结果前校验 `requestId == slotRequestId && 选中的相机没变`；`fillSlotFromLibrary` 的首个 `addRecipes`/`cameraSlots` 也改走 `withSession`。
+
+验证：149 项 JVM 测试 0 失败（新增 `addToSlot_refusesToPatchWhenLayoutIsUnknown`），lint 0 error / 6 warning；`0.10.1-alpha` / versionCode 52。
+
 ## 版本历史
 
 | 版本 | 内容 | 真机 | 验收记录 |
