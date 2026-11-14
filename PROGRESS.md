@@ -88,6 +88,16 @@
 
 `docs/acceptance/0.4.md` 已填表并改写结论；PRD 的 D-09 行同步为真机通过。
 
+## 2026-11-14 · 0.8.8：全链路复测发现的三处可用性问题
+
+| 问题 | 现象 | 修法 |
+|---|---|---|
+| NEW 筛选筛出空屏 | 服务端 144 条的 `is_new` 现已全部为 false（10 月的"新品"标记过期），点 NEW 只剩「换个关键词」 | `CloudCatalogState.hasNew = recipes.any { it.isNew }`；没有新品时**不渲染** NEW 按钮 |
+| 取消收藏会静默清掉相机槽位 | 真机实测：取消收藏 `Mid-Spring` 后，`Zf` 第 2 位跟着变空；原对话框却写"相机槽位里已排好的位置不受影响"（错的） | 详情页新增 `placements`（用 `H13` 的 `camera[].recipeIds` 定位，不额外拉 `C002`）；按钮下显示「正在 Zf 第 2 位的槽位上」；确认框改为「并同时清空 Zf 第 2 位的槽位（相机联网后会跟着变空）」；取消后的 Toast 也报出被清的槽位 |
+| 排序/搜索/NEW 组合 | 逐项点过：最新→Mate Film、最早→MOSS、热门→QUIET；搜索 `Blue` 命中 Bluegrain/Faded Blue | 符合预期，无需改动 |
+
+新增 2 条 JVM 测试（`loadCollection reports which camera slot the recipe occupies`、`removeFromCollection says which slots were cleared`），总计 143 项全绿。
+
 ## 2026-11-14 · 0.8.7：仓库版权清理（去第三方 NP3 与官方详情快照）
 
 按方案 A 执行，公开仓库不再包含他人作品：

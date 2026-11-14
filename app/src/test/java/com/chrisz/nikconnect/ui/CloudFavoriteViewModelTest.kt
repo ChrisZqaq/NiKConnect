@@ -83,9 +83,13 @@ class CloudFavoriteViewModelTest {
             return refreshResult
         }
 
-        override suspend fun listCameras(): List<CloudCamera> = emptyList()
+        var cameras: List<CloudCamera> = emptyList()
+        var layouts: Map<String, List<String?>> = emptyMap()
+
+        override suspend fun listCameras(): List<CloudCamera> = cameras
         override suspend fun cameraSlots(cameraId: String, recipeIds: List<String?>?): List<CloudSlot> = emptyList()
-        override suspend fun fetchAssignable(): CloudAssignable = CloudAssignable(emptyList())
+        override suspend fun fetchAssignable(): CloudAssignable =
+            CloudAssignable(recipes = emptyList(), layouts = layouts)
         override suspend fun replaceSlots(cameraId: String, assignments: List<CloudSlotAssignment>): String = ""
         override suspend fun deleteSlot(cameraId: String, recipeId: String): String = ""
         override suspend fun addRecipes(cameraId: String, recipeIds: List<String>): String = ""
@@ -133,6 +137,38 @@ class CloudFavoriteViewModelTest {
         assertEquals(listOf("01LOCAL"), fake.removedIds)
         assertNull(vm.state.value.collected)
         assertTrue(vm.state.value.notice.orEmpty().contains("取消"))
+    }
+
+    @Test
+    fun `loadCollection reports which camera slot the recipe occupies`() = runTest(dispatcher) {
+        // 真机实测：取消收藏会把槽位一起清掉，所以详情页必须先说明"它正占着哪一位"
+        val fake = FakeApi()
+        fake.recipes = listOf(OwnedRecipe(id = "01LOCAL", name = "Mid-Spring"))
+        fake.cameras = listOf(CloudCamera(id = "CAM1", name = "Zf", model = "Zf"))
+        fake.layouts = mapOf("CAM1" to listOf("01OTHER", "01LOCAL", null))
+        val vm = CloudFavoriteViewModel("t", "g", apiFactory = { _, _ -> fake })
+        vm.loadCollection("Mid-Spring")
+        advanceUntilIdle()
+
+        assertEquals(listOf(Placement(cameraName = "Zf", slot = 2)), vm.state.value.placements)
+    }
+
+    @Test
+    fun `removeFromCollection says which slots were cleared`() = runTest(dispatcher) {
+        val fake = FakeApi()
+        fake.recipes = listOf(OwnedRecipe(id = "01LOCAL", name = "Mid-Spring"))
+        fake.cameras = listOf(CloudCamera(id = "CAM1", name = "Zf", model = "Zf"))
+        fake.layouts = mapOf("CAM1" to listOf("01OTHER", "01LOCAL", null))
+        val vm = CloudFavoriteViewModel("t", "g", apiFactory = { _, _ -> fake })
+        vm.loadCollection("Mid-Spring")
+        advanceUntilIdle()
+
+        vm.removeFromCollection("01LOCAL")
+        advanceUntilIdle()
+
+        val notice = vm.state.value.notice.orEmpty()
+        assertTrue("notice was: $notice", notice.contains("Zf 第 2 位"))
+        assertTrue(vm.state.value.placements.isEmpty())
     }
 
     @Test

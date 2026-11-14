@@ -42,6 +42,10 @@ internal data class CloudCatalogState(
     val detailLoading: Boolean = false,
     val detailError: String? = null,
 ) {
+    /** 当前目录里是否还有被标为 NEW 的方案；服务端 NEW 标记会过期，过期后不该再给一个筛出空屏的按钮。 */
+    val hasNew: Boolean
+        get() = recipes.any { it.isNew }
+
     val visible: List<CloudRecipe>
         get() {
             val q = query.trim()

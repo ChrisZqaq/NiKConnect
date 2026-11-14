@@ -23,12 +23,17 @@ import kotlinx.coroutines.launch
  */
 internal data class CloudFavoriteState(
     val collected: OwnedRecipe? = null,
+    /** 这个方案当前占着哪几台相机的哪几个槽位；取消收藏会把这些槽位一起清掉。 */
+    val placements: List<Placement> = emptyList(),
     val loading: Boolean = false,
     val working: Boolean = false,
     val error: String? = null,
     val notice: String? = null,
     val detail: String? = null,
 )
+
+/** 方案在相机槽位里的落点（1 基槽位号）。 */
+internal data class Placement(val cameraName: String, val slot: Int)
 
 internal class CloudFavoriteViewModel(
     token: String,
@@ -70,7 +75,9 @@ internal class CloudFavoriteViewModel(
                 ensureGuid()
                 val mine = withSession { api().fetchMyRecipes() }
                 val hit = mine.recipes.firstOrNull { it.name.equals(recipeName, ignoreCase = true) }
-                _state.update { it.copy(loading = false, collected = hit) }
+                val placements = if (hit == null) emptyList() else runCatching { loadPlacements(hit.id) }
+                    .getOrDefault(emptyList())
+                _state.update { it.copy(loading = false, collected = hit, placements = placements) }
             } catch (e: Exception) {
                 _state.update { it.copy(loading = false, error = describe(e, "IF_FR100_H05"), detail = detailOf(e)) }
             }
@@ -97,6 +104,7 @@ internal class CloudFavoriteViewModel(
                     it.copy(
                         working = false,
                         collected = hit,
+                        placements = emptyList(),
                         notice = "已收藏，可在账号页槽位「＋」里选它",
                     )
                 }
@@ -116,14 +124,40 @@ internal class CloudFavoriteViewModel(
             try {
                 ensureGuid()
                 withSession { api().removeFromLibrary(listOf(localId)) }
+                val cleared = _state.value.placements
+                val suffix = if (cleared.isEmpty()) "" else
+                    "，同时清空了 " + cleared.joinToString("、") { "${it.cameraName} 第 ${it.slot} 位" } + " 的槽位"
                 _state.update {
-                    it.copy(working = false, collected = null, notice = "已取消收藏")
+                    it.copy(
+                        working = false,
+                        collected = null,
+                        placements = emptyList(),
+                        notice = "已取消收藏$suffix",
+                    )
                 }
             } catch (e: Exception) {
                 _state.update {
                     it.copy(working = false, error = describe(e, "IF_IR_R_LR003"), detail = detailOf(e))
                 }
             }
+        }
+    }
+
+    /**
+     * 查这个本地方案占着哪些槽位。
+     *
+     * 为什么需要：真机实测发现**取消收藏会把对应槽位一起清掉**（槽位引用的是本地方案 id），
+     * 用户并不知道这件事，所以必须在按钮旁与确认框里说出来。
+     * 只用 `H13` 的 `camera[].recipeIds` 就能定位，不必逐台再拉 `C002`。
+     */
+    private suspend fun loadPlacements(localId: String): List<Placement> {
+        if (localId.isBlank()) return emptyList()
+        val cameras = withSession { api().listCameras() }
+        val assignable = withSession { api().fetchAssignable() }
+        return cameras.mapNotNull { camera ->
+            val layout = assignable.layouts[camera.id] ?: return@mapNotNull null
+            val slot = layout.indexOfFirst { it == localId }
+            if (slot < 0) null else Placement(camera.name, slot + 1)
         }
     }
 

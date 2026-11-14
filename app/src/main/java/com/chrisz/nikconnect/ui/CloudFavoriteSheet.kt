@@ -117,6 +117,14 @@ internal fun CloudFavoriteBar(
         }
     }
 
+    if (state.placements.isNotEmpty()) {
+        Text(
+            "正在 " + state.placements.joinToString("、") { "${it.cameraName} 第 ${it.slot} 位" } + "的槽位上",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+
     state.error?.let { error ->
         Text(
             error,
@@ -140,7 +148,18 @@ internal fun CloudFavoriteBar(
         AlertDialog(
             onDismissRequest = { confirmRemove = false },
             title = { Text("取消收藏？") },
-            text = { Text("会把「${collected.name}」从你的收藏里删掉。相机槽位里已排好的位置不受影响。") },
+            text = {
+                val slots = state.placements
+                Text(
+                    if (slots.isEmpty()) {
+                        "会把「${collected.name}」从你的收藏里删掉。它当前没有排在任何相机槽位。"
+                    } else {
+                        "会把「${collected.name}」从收藏里删掉，并同时清空 " +
+                            slots.joinToString("、") { "${it.cameraName} 第 ${it.slot} 位" } +
+                            "的槽位（相机联网后会跟着变空）。"
+                    },
+                )
+            },
             confirmButton = {
                 TextButton(
                     onClick = {

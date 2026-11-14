@@ -275,7 +275,9 @@ private fun CloudBrowseContent(
                 )
                 Spacer(Modifier.width(18.dp))
             }
-            SortLabel(text = "NEW", selected = state.onlyNew, onClick = onToggleNew)
+            if (state.hasNew) {
+                SortLabel(text = "NEW", selected = state.onlyNew, onClick = onToggleNew)
+            }
         }
 
         if (state.error != null) {
