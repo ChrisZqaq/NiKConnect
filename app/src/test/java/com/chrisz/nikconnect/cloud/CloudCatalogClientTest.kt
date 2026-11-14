@@ -120,6 +120,20 @@ class CloudCatalogClientTest {
     }
 
     @Test
+    fun `detail renders gamma axes as fixed instead of raw token`() {
+        val raw = """
+            {"id":"01X","name":"Flat-ish","pictureControlName":"Flatish",
+             "pictureControl":{"settingName":"Flatish","baseName":"FLAT",
+               "contrast":"gamma","highlight":"gamma","shadow":"gamma",
+               "whiteLevel":"gamma","blackLevel":"gamma","saturation":"+1.00"}}
+        """.trimIndent()
+        val params = client().parseDetail(raw).params
+        assertEquals(5, params.count { it.value == "固定" })
+        assertTrue(params.none { it.value.equals("gamma", ignoreCase = true) })
+        assertEquals("+1.00", params.first { it.label == "饱和度" }.value)
+    }
+
+    @Test
     fun `detail exposes morning base params instead of hiding them`() {
         // 真机/官网实测：baseName=MORNING 的方案（Bluegrain_jyota）用的是另一组字段
         val raw = """

@@ -116,8 +116,11 @@ internal class CloudCatalogClient(
 
     /** 参数顺序与相机菜单一致；`-` 表示该方案未设置此参数，直接省略。 */
     private fun extractParams(pc: JsonObject): List<CloudParam> = PARAM_LABELS.mapNotNull { (key, label) ->
-        val value = pc.str(key)?.trim().orEmpty()
-        if (value.isBlank() || value == "-") null else CloudParam(label, value)
+        val raw = pc.str(key)?.trim().orEmpty()
+        if (raw.isBlank() || raw == "-") return@mapNotNull null
+        // 服务端用字面量 "gamma" 表示「这根轴由曲线固定、不可调」（144 个方案里约 4 成如此）。
+        // 直接把 gamma 显示给用户是开发者语言，界面上统一写「固定」。
+        CloudParam(label, if (raw.equals("gamma", ignoreCase = true)) "固定" else raw)
     }
 
     private fun extractExif(exif: JsonObject?): List<CloudParam> {

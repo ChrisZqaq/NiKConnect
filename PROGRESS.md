@@ -88,6 +88,11 @@
 
 `docs/acceptance/0.4.md` 已填表并改写结论；PRD 的 D-09 行同步为真机通过。
 
+## 2026-11-14 · 0.8.9：详情参数不再显示服务端字面量 `gamma`
+
+12 个方案抽样里有 5 个把 `contrast/highlight/shadow/whiteLevel/blackLevel` 返回成字面量 `"gamma"`（表示这根轴由曲线固定、不可调）。界面原来原样显示 `gamma`，用户看不懂。
+现在统一渲染为「固定」；新增单测 `detail renders gamma axes as fixed instead of raw token`（断言 5 个「固定」且无 `gamma` 残留），真机复看该方案已无 `gamma` 字样。
+
 ## 2026-11-14 · 0.8.8：全链路复测发现的三处可用性问题
 
 | 问题 | 现象 | 修法 |
