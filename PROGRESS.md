@@ -291,6 +291,14 @@
 
 验证：149 项 JVM 测试 0 失败（新增 `addToSlot_refusesToPatchWhenLayoutIsUnknown`），lint 0 error / 6 warning；`0.10.1-alpha` / versionCode 52。
 
+## 2026-11-14 · 0.10.2：Astra 评审 C 批（会话与分页）
+
+- **F07 相机异常不再清空云创登录**：`ui/MainViewModel.kt` 的 `handleOperationFailure` 原本在"未连接"分支 `_state.update { UiState(downloads = …, error = …) }`，重建整个状态把 `cloudToken/cloudGuid/cloudRefreshToken/galleryViewTier` 一起丢掉。改为 `it.copy(loadingPhotos = false, error = …)`。
+- **F10 分页用句柄快照**：`ptp/PtpDatasets.kt` 新增 `internal data class PhotoPage(total, photos, hasMore, snapshot)`；`ptp/PtpIpClient.kt` 的 `listPhotos(handleOffset, pageSize, snapshot = null)` 在 `snapshot == null` 时才 `GetObjectHandles`，分页一律沿用首屏快照（相机中途新增/删除文件不再让 offset 漂移，表现为重复项与漏项）；`camera/CameraRepository.kt` 透传；`ui/MainViewModel.kt` 新增 `private var handleSnapshot: List<Long>?`，`refreshPhotos()` 存快照、`loadMorePhotos()` 传快照。
+- 说明：新拍的照片仍在**下次刷新**时出现（刷新会重抓快照），这是有意为之——中途插入会让"已翻过的页"重复。
+
+验证：149 项 JVM 测试 0 失败（`PtpIpClientLoopbackTest` 改为 `PhotoPage` 字段断言，并显式传 `snapshot`），lint 0 error / 6 warning；`0.10.2-alpha` / versionCode 53。
+
 ## 版本历史
 
 | 版本 | 内容 | 真机 | 验收记录 |

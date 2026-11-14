@@ -233,15 +233,17 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         val job = viewModelScope.launch {
             _state.update { it.copy(loadingPhotos = true, error = null) }
             runCatching { withContext(Dispatchers.IO) { repository.listPhotos() } }
-                .onSuccess { (total, photos, hasMore) ->
+                .onSuccess { page ->
                     if (!sessions.isCurrent(generation)) return@onSuccess
-                    nextHandleOffset = photos.size
+                    // 句柄快照跟着这次列表走：后续分页沿用它，避免相机有新照片时 offset 漂移。
+                    handleSnapshot = page.snapshot
+                    nextHandleOffset = page.photos.size
                     _state.update {
                         it.copy(
                             loadingPhotos = false,
-                            totalPhotoCount = total,
-                            photos = photos.filter { photo -> photo.isJpeg || photo.isRaw },
-                            hasMore = hasMore,
+                            totalPhotoCount = page.total,
+                            photos = page.photos.filter { photo -> photo.isJpeg || photo.isRaw },
+                            hasMore = page.hasMore,
                         )
                     }
                 }
@@ -252,6 +254,9 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
 
     private var nextHandleOffset = 0
 
+    /** 首屏抓到的句柄快照；分页沿用，刷新（重新列表）时替换。 */
+    private var handleSnapshot: List<Long>? = null
+
     /** 加载下一页对象信息（追加到现有列表之后）。 */
     fun loadMorePhotos() {
         val state = _state.value
@@ -260,16 +265,16 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         val offset = nextHandleOffset
         val job = viewModelScope.launch {
             _state.update { it.copy(loadingMore = true, error = null) }
-            runCatching { withContext(Dispatchers.IO) { repository.listPhotos(offset) } }
-                .onSuccess { (total, photos, hasMore) ->
+            runCatching { withContext(Dispatchers.IO) { repository.listPhotos(offset, snapshot = handleSnapshot) } }
+                .onSuccess { page ->
                     if (!sessions.isCurrent(generation)) return@onSuccess
-                    nextHandleOffset = offset + photos.size
+                    nextHandleOffset = offset + page.photos.size
                     _state.update {
                         it.copy(
                             loadingMore = false,
-                            totalPhotoCount = total,
-                            photos = it.photos + photos.filter { photo -> photo.isJpeg || photo.isRaw },
-                            hasMore = hasMore,
+                            totalPhotoCount = page.total,
+                            photos = it.photos + page.photos.filter { photo -> photo.isJpeg || photo.isRaw },
+                            hasMore = page.hasMore,
                         )
                     }
                 }
@@ -347,9 +352,9 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         if (repository.isConnected) {
             _state.update { it.copy(loadingPhotos = false, error = humanError(error)) }
         } else {
-            _state.update {
-                UiState(downloads = it.downloads, error = humanError(error))
-            }
+            // 错误路径不能重建整个 UiState：那会把云创 token/guid/refresh、图库档位一起清掉
+            // （真机上表现为"相机掉线后云创账号也没了"，评审 F07）。
+            _state.update { it.copy(loadingPhotos = false, error = humanError(error)) }
         }
     }
 

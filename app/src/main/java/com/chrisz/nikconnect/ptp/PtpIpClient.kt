@@ -108,19 +108,29 @@ internal class PtpIpClient(
      * 返回总句柄数、当前页对象列表、是否还有下一页。每页耗时打点输出便于真机调优。
      */
     @Synchronized
+    /**
+     * 读一页对象信息。
+     *
+     * [snapshot] 是**首次列表时抓到的句柄快照**：分页必须沿用它，不能每页重新
+     * `GetObjectHandles` —— 期间相机新增/删除文件会让 offset 漂移，表现为重复项与漏项
+     * （评审 F10）。新拍的照片在下次刷新（snapshot 为 null）时出现。
+     */
     fun listPhotos(
         handleOffset: Int = 0,
         pageSize: Int = 60,
-    ): Triple<Int, List<PhotoObject>, Boolean> {
+        snapshot: List<Long>? = null,
+    ): PhotoPage {
         require(handleOffset >= 0) { "句柄偏移不能为负数" }
         require(pageSize > 0) { "分页大小必须大于零" }
-        val handles = decodeU32Array(
+        val handles = snapshot ?: decodeU32Array(
             checked(transaction(OpCode.GET_OBJECT_HANDLES, listOf(0xffffffffL, 0, 0)), "读取文件列表").data,
         )
         // 相机返回旧→新，展示用最新优先
         val newestFirst = handles.asReversed()
         val start = handleOffset
-        if (start >= newestFirst.size) return Triple(handles.size, emptyList(), false)
+        if (start >= newestFirst.size) {
+            return PhotoPage(total = handles.size, photos = emptyList(), hasMore = false, snapshot = handles)
+        }
         val pageHandles = newestFirst.drop(start).take(pageSize)
         val pageStart = System.currentTimeMillis()
         val page = pageHandles.map { handle ->
@@ -136,7 +146,7 @@ internal class PtpIpClient(
             )
         }
         val next = start + pageHandles.size
-        return Triple(handles.size, page, next < newestFirst.size)
+        return PhotoPage(total = handles.size, photos = page, hasMore = next < newestFirst.size, snapshot = handles)
     }
 
     @Synchronized

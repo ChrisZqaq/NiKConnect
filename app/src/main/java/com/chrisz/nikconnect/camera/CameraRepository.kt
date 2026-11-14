@@ -3,6 +3,7 @@ package com.chrisz.nikconnect.camera
 import android.content.Context
 import com.chrisz.nikconnect.ptp.DeviceInfo
 import com.chrisz.nikconnect.ptp.PhotoObject
+import com.chrisz.nikconnect.ptp.PhotoPage
 import com.chrisz.nikconnect.ptp.PtpIpClient
 import java.io.Closeable
 import java.io.IOException
@@ -85,8 +86,11 @@ internal class CameraRepository(context: Context) : Closeable {
         }
     }
 
-    fun listPhotos(handleOffset: Int = 0, pageSize: Int = 60): Triple<Int, List<PhotoObject>, Boolean> =
-        requireClient().listPhotos(handleOffset, pageSize)
+    fun listPhotos(
+        handleOffset: Int = 0,
+        pageSize: Int = 60,
+        snapshot: List<Long>? = null,
+    ): PhotoPage = requireClient().listPhotos(handleOffset, pageSize, snapshot)
 
     fun thumbnail(handle: Long): ByteArray = requireClient().getThumbnail(handle)
 

@@ -9,6 +9,19 @@ internal data class DeviceInfo(
     val supportsPartialObject: Boolean get() = OpCode.GET_PARTIAL_OBJECT in operationsSupported
 }
 
+/**
+ * 一页照片 + 本次列表使用的句柄快照。
+ *
+ * 分页时要把 [snapshot] 原样传回 [PtpIpClient.listPhotos]，否则每页重取句柄表会因相机新增/删除
+ * 文件而漂移（评审 F10）。
+ */
+internal data class PhotoPage(
+    val total: Int,
+    val photos: List<PhotoObject>,
+    val hasMore: Boolean,
+    val snapshot: List<Long>,
+)
+
 internal data class PhotoObject(
     val handle: Long,
     val storageId: Long,
