@@ -390,6 +390,47 @@ internal class CloudAccountViewModel(
         }
     }
 
+    /**
+     * 从「我的收藏」移出某个方案（`IF_IR_R_LR003`，删除语义）。
+     *
+     * 注意副作用：相机槽位引用的是本地方案 id，删掉它会让占用该方案的槽位一起变空，
+     * 所以确认框必须说清，且删完要刷新当前相机的排布。
+     */
+    fun removeLibraryItem(item: OwnedRecipe) {
+        if (item.id.isBlank() || _state.value.saving) return
+        _state.update { it.copy(saving = true, saveError = null) }
+        viewModelScope.launch {
+            try {
+                withSession { it.removeFromLibrary(listOf(item.id)) }
+                val client = clientFactory(accessToken, _state.value.guid.orEmpty())
+                val library = runCatching { withSession { it.fetchMyRecipes() } }.getOrNull()
+                val camera = _state.value.selected
+                val refreshed = if (camera != null) {
+                    runCatching { fetchSlots(client, camera.id) }.getOrNull()
+                } else {
+                    null
+                }
+                _state.update {
+                    it.copy(
+                        saving = false,
+                        library = library ?: it.library,
+                        slots = refreshed ?: it.slots,
+                        draft = if (refreshed != null && it.draft != null) null else it.draft,
+                        savedNotice = "已从收藏里移出「${item.name.ifBlank { item.pictureControlName }}」· 占用它的槽位会一起变空",
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(
+                        saving = false,
+                        saveError = describe(e as? CloudException, "IF_IR_R_LR003"),
+                        rawSnippet = e.message,
+                    )
+                }
+            }
+        }
+    }
+
     fun dismissSlotPicker() {
         _state.update { it.copy(pickingSlot = null) }
     }

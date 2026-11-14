@@ -313,6 +313,14 @@
 
 验证：149 项 JVM 测试 0 失败、lint 0 error / 6 warning；`0.10.4-alpha` / versionCode 55。
 
+## 2026-11-14 · 0.10.5：收尾三件（掉线指引 / 收藏清理 / 旧文档）
+
+- **相机掉线指引**：`ui/MainScreen.kt` 连接页在两步卡片下加一句实测约束——「相机和手机一断联，相机自己会关掉热点；下次连接前，请在机身「连接至智能设备 → Wi-Fi 连接」里重新打开一次。」App 无法代劳，与其让用户反复点重试，不如提前说清。
+- **我的收藏可逐个移出**：`ui/CloudAccountViewModel.kt` 新增 `removeLibraryItem(item)`（`IF_IR_R_LR003`，删除语义）——成功后刷新 H05 与当前相机排布，并在提示里说明「占用它的槽位会一起变空」；`ui/CloudAccountScreen.kt` 的 `LibrarySection` 由「方案名拼成一段」改为逐行列表 + 行尾垃圾桶 + 二次确认框（`onRemoveLibraryItem` 经 `CameraSection` / `SlotSection` 下传）。
+- **旧文档清理**：`docs/PRD.md` 的三处 WebView 时代表述（§3 云创定位、C-08、§12 云创真机行）改写为 OIDC 授权码 + PKCE / Keystore / 白名单日志口径；`docs/acceptance/0.4.md` 的「0.1.1/0.4 云创 WebView 旧项未执行」改为「已整体删除，不再回归」。
+
+验证：149 项 JVM 测试 0 失败、lint 0 error / 6 warning；`0.10.5-alpha` / versionCode 56。
+
 ## 版本历史
 
 | 版本 | 内容 | 真机 | 验收记录 |

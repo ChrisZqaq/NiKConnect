@@ -212,6 +212,13 @@ private fun ConnectionScreen(state: UiState, onConnect: () -> Unit) {
                 ConnectionStep("2", "手机连接相机 Wi-Fi", "无互联网时选择“保持连接”")
             }
         }
+        // 相机侧行为（真机实测）：一断联相机就自己关掉热点，App 无法重新打开它。
+        // 与其让用户反复点「重试」，不如在首次连接前就说清这一步在机身上做。
+        Text(
+            "相机和手机一断联，相机自己会关掉热点；下次连接前，请在机身「连接至智能设备 → Wi-Fi 连接」里重新打开一次。",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         state.error?.let { message ->
             ConnectionErrorCard(
                 message = message,

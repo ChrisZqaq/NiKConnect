@@ -159,7 +159,12 @@ internal fun CloudAccountScreen(
         if (!state.hasCredentials) {
             Notice("没有拿到账号 ID。点右上角刷新重试；仍然失败就退出后重新登录云创。")
         } else if (state.selected == null) {
-            CameraSection(state = state, onOpen = model::openCamera, onLogout = onLogout)
+            CameraSection(
+                state = state,
+                onOpen = model::openCamera,
+                onLogout = onLogout,
+                onRemoveLibraryItem = model::removeLibraryItem,
+            )
         } else {
             SlotSection(
                 state = state,
@@ -171,6 +176,7 @@ internal fun CloudAccountScreen(
                 onPick = model::openSlotPicker,
                 onSave = model::saveLayout,
                 onNoticeShown = model::consumeNotice,
+                onRemoveLibraryItem = model::removeLibraryItem,
             )
         }
         pendingDelete?.let { slot ->
@@ -291,6 +297,7 @@ private fun CameraSection(
     state: CloudAccountState,
     onOpen: (com.chrisz.nikconnect.cloud.CloudCamera) -> Unit,
     onLogout: () -> Unit,
+    onRemoveLibraryItem: (OwnedRecipe) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -361,7 +368,7 @@ private fun CameraSection(
 
         state.rawSnippet?.let { RawSnippet(it) }
 
-        LibrarySection(state)
+        LibrarySection(state = state, onRemove = onRemoveLibraryItem)
 
         Text(
             "说明：云创方案占相机内的 9 个云创槽位（独立存储区），不是机身菜单的 C-1…C-9。方案由相机自己联网拉取；点进相机可编辑槽位排布。",
@@ -381,7 +388,10 @@ private fun CameraSection(
  * 没有任何 `DELETE /publicbook`，硬猜端点是拿用户账号试错。要删只能去网页端。
  */
 @Composable
-private fun LibrarySection(state: CloudAccountState) {
+private fun LibrarySection(
+    state: CloudAccountState,
+    onRemove: (OwnedRecipe) -> Unit,
+) {
     val library = state.library
     if (library == null && !state.loadingLibrary && state.libraryError == null) return
 
@@ -441,6 +451,8 @@ private fun LibrarySection(state: CloudAccountState) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        // 每个方案一行，行尾可移出：只读列表在真机上没法清理垃圾收藏（0.10.5）
+        var pendingRemove by remember { mutableStateOf<OwnedRecipe?>(null) }
         visible.forEach { (label, items) ->
             Column(Modifier.padding(top = 10.dp)) {
                 Text(
@@ -448,16 +460,61 @@ private fun LibrarySection(state: CloudAccountState) {
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onBackground,
                 )
-                Text(
-                    if (items.isEmpty()) {
-                        "空"
-                    } else {
-                        items.joinToString(" · ") { it.name.ifBlank { it.pictureControlName } }
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                if (items.isEmpty()) {
+                    Text(
+                        "空",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                items.forEach { item ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            item.name.ifBlank { item.pictureControlName },
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(
+                            onClick = { pendingRemove = item },
+                            enabled = !state.saving,
+                            modifier = Modifier.size(44.dp),
+                        ) {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = "从收藏里移出",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    }
+                }
             }
+        }
+
+        pendingRemove?.let { item ->
+            AlertDialog(
+                onDismissRequest = { pendingRemove = null },
+                title = { Text("从收藏里移出？") },
+                text = {
+                    Text(
+                        "会把「${item.name.ifBlank { item.pictureControlName }}」从账号的收藏里删掉。" +
+                            "如果它正排在某个相机槽位上，那位会一起变空（相机联网后跟着变）。",
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        pendingRemove = null
+                        onRemove(item)
+                    }) { Text("移出", color = MaterialTheme.colorScheme.error) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingRemove = null }) { Text("取消") }
+                },
+            )
         }
     }
 }
@@ -465,6 +522,7 @@ private fun LibrarySection(state: CloudAccountState) {
 @Composable
 private fun SlotSection(
     state: CloudAccountState,
+    onRemoveLibraryItem: (OwnedRecipe) -> Unit,
     onRetry: () -> Unit,
     onEdit: () -> Unit,
     onCancelEdit: () -> Unit,
@@ -677,7 +735,7 @@ private fun SlotSection(
         }
 
         Spacer(Modifier.height(6.dp))
-        LibrarySection(state)
+        LibrarySection(state = state, onRemove = onRemoveLibraryItem)
 
         state.rawSnippet?.let { RawSnippet(it) }
 
