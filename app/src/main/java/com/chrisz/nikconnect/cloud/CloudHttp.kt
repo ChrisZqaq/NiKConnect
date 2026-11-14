@@ -174,8 +174,12 @@ internal class CloudHttp(
                 val code = conn.responseCode
                 val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
                     ?.bufferedReader()?.use { it.readText() }.orEmpty()
-                log("$callId $method $url -> $code ${body?.take(200).orEmpty()} | ${text.take(200)}")
-                CloudDebug.record("$callId-$code", "$method $url\n${body.orEmpty()}", text)
+                // 只记白名单字段：callId / 方法 / 状态码 / 响应字节数 / 业务码。
+                // 请求体与响应可能含 access_token、refresh_token、验证码，任何构建都不落日志。
+                log("$callId $method -> $code ${text.length}B ${businessErrorCode(text)}")
+                if (!isAuthCall(callId)) {
+                    CloudDebug.record("$callId-$code", "$method $url\n${redact(body.orEmpty())}", redact(text))
+                }
                 if (code == 401 || code == 403) throw CloudException("$callId HTTP $code", httpStatus = code)
                 if (code !in 200..299) throw CloudException("$callId HTTP $code：${text.take(160)}", httpStatus = code)
                 text
@@ -200,6 +204,11 @@ internal class CloudHttp(
     private fun log(line: String) {
         runCatching { android.util.Log.d("NikConnect", line) }
     }
+
+    /** 认证端点（换码/续期/用户信息）的 body 与响应一律不落盘、不打印。 */
+    private fun isAuthCall(callId: String): Boolean = isAuthCallId(callId)
+
+    private fun redact(text: String): String = redactSecrets(text)
 
     /** 单调时钟：系统时间被改动时不会把间隔算错。 */
     private fun nowMillis(): Long = System.nanoTime() / 1_000_000L
@@ -335,3 +344,18 @@ internal data class HttpCall(
     val contentType: String = "text/plain;charset=UTF-8",
     val omitOrigin: Boolean = false,
 )
+
+
+/** 认证类 callId：换码、续期、用户信息。它们的 body/响应含凭据，一律不落盘。 */
+internal fun isAuthCallId(callId: String): Boolean = callId.startsWith("OIDC")
+
+/**
+ * 兜底脱敏：即便将来有非认证端点回带凭据，也不会原样写进日志或诊断文件。
+ * 覆盖 form-encoded（`refresh_token=…&`）与 JSON（`"access_token":"…"`）两种形态。
+ */
+internal fun redactSecrets(text: String): String = text
+    .replace(Regex("(?i)((?:access|refresh|id)_token|code_verifier)=\\S+"), "$1=<redacted>")
+    .replace(
+        Regex("(?i)\"((?:access|refresh|id)_token)\"\\s*:\\s*\"[^\"]*\""),
+        "\"$1\":\"<redacted>\"",
+    )

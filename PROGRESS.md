@@ -271,6 +271,17 @@
 
 **仍待真机（需登录态）**：账号页三处折叠、槽位选择器合并列表、「加到相机」真实链路（`LR002 → H05 → C003 → H13 → C004`）、Wi-Fi 设置跳转复测。
 
+## 2026-11-14 · 0.10.0：Astra 评审 A 批（资产保护）
+
+按终局评审的 A 批施工，四项都动了产品行为，不是纯重构：
+
+- **F01 同名冲突绝不删原件**：`camera/PhotoDownloader.kt` 的 `existingImage()` 原本在「同名但大小不同」时 `resolver.delete()` 旧行——两张不同照片（换卡、换机身、编号回绕）都可能叫 `DSC_0001.JPG`，那一步等于删用户资产。改为只认「同名 + 同字节数」复用，其余情况并存，新文件由 MediaStore 自己加 `(1)` 后缀。
+- **F02 凭据不入日志**：`cloud/CloudHttp.kt` 原来 `log("$callId $method $url -> $code ${body.take(200)} | ${text.take(200)}")` 无门控，`OIDC_REFRESH` 的表单体含 `refresh_token`。改为白名单日志（callId + 方法 + 状态码 + 响应字节数 + 业务码）；`isAuthCallId` / `redactSecrets` 提为顶层函数并加测试；认证端点不写 `CloudDebug`；删除 `CloudDebug.recordToken` 与 `MainViewModel` 里的调用（debug 包也不再自动落盘 token）。
+- **F03 收藏身份不再靠名字猜**：`ui/CloudFavoriteViewModel.kt` 的 `toggleCollection` 改为「操作前后 H05 差集」认领——恰好新增 1 个才认作本次收藏；同名多份或差集不唯一时不提供「取消收藏」，只提示去账号页核对。`loadCollection` 用 `singleOrNull()`，多同名直接报歧义。
+- **F06 槽位关联三态**：新增 `sealed interface Placements { Loading / Unknown / Known(list) }`，查询失败不再等价于「没有排在槽位」；`ui/CloudFavoriteSheet.kt` 对 Unknown 显示「槽位占用未核对」，确认框文案也随三态变化。
+
+验证：148 项 JVM 测试 0 失败（新增 `RedactSecretsTest` 4 项、`CloudFavoriteViewModelTest` 三态断言），lint 0 error / 6 warning，`assembleDebug` 通过；`0.10.0-alpha` / versionCode 51。
+
 ## 版本历史
 
 | 版本 | 内容 | 真机 | 验收记录 |

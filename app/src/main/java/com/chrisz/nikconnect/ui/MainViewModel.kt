@@ -145,8 +145,6 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         val refresh = state.refreshToken?.takeIf { it.isNotBlank() }
             ?: _state.value.cloudRefreshToken
         token?.let { tokenStore.save(it, refresh) }
-        // 仅 debug 构建：把 token 落盘，方便在 Mac 上用 curl 试接口形状（见 CloudDebug.recordToken）
-        com.chrisz.nikconnect.cloud.CloudDebug.recordToken(token, refresh)
         _state.update {
             it.copy(
                 cloudToken = token ?: it.cloudToken,

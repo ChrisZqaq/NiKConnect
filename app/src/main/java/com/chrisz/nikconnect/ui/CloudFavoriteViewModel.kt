@@ -23,8 +23,13 @@ import kotlinx.coroutines.launch
  */
 internal data class CloudFavoriteState(
     val collected: OwnedRecipe? = null,
-    /** 这个方案当前占着哪几台相机的哪几个槽位；取消收藏会把这些槽位一起清掉。 */
-    val placements: List<Placement> = emptyList(),
+    /**
+     * 这个方案当前占着哪几台相机的哪几个槽位；取消收藏会把这些槽位一起清掉。
+     *
+     * 三态而不是「空列表」：**查询失败不等于没有关联**。把失败显示成"没有排在槽位"，
+     * 用户会在毫无预期的情况下丢掉槽位排布（评审 F06）。
+     */
+    val placements: Placements = Placements.Unknown,
     val loading: Boolean = false,
     val working: Boolean = false,
     val error: String? = null,
@@ -34,6 +39,13 @@ internal data class CloudFavoriteState(
 
 /** 方案在相机槽位里的落点（1 基槽位号）。 */
 internal data class Placement(val cameraName: String, val slot: Int)
+
+/** 关联槽位的三态：查不到（Unknown）绝不能被当成"没有关联"（Known(empty)）。 */
+internal sealed interface Placements {
+    data object Loading : Placements
+    data object Unknown : Placements
+    data class Known(val list: List<Placement>) : Placements
+}
 
 internal class CloudFavoriteViewModel(
     token: String,
@@ -74,10 +86,22 @@ internal class CloudFavoriteViewModel(
             try {
                 ensureGuid()
                 val mine = withSession { api().fetchMyRecipes() }
-                val hit = mine.recipes.firstOrNull { it.name.equals(recipeName, ignoreCase = true) }
-                val placements = if (hit == null) emptyList() else runCatching { loadPlacements(hit.id) }
-                    .getOrDefault(emptyList())
-                _state.update { it.copy(loading = false, collected = hit, placements = placements) }
+                val matches = mine.recipes.filter { it.name.equals(recipeName, ignoreCase = true) }
+                // 名称不是身份：账号里出现多个同名方案时，不能挑一个当"就是这个"去删。
+                val hit = matches.singleOrNull()
+                val placements = if (hit == null) Placements.Known(emptyList()) else loadPlacementsOrUnknown(hit.id)
+                _state.update {
+                    it.copy(
+                        loading = false,
+                        collected = hit,
+                        placements = placements,
+                        error = if (matches.size > 1) {
+                            "账号里有 ${matches.size} 个同名方案，无法确定是哪一份；请到账号页核对"
+                        } else {
+                            null
+                        },
+                    )
+                }
             } catch (e: Exception) {
                 _state.update { it.copy(loading = false, error = describe(e, "IF_FR100_H05"), detail = detailOf(e)) }
             }
@@ -92,6 +116,10 @@ internal class CloudFavoriteViewModel(
         viewModelScope.launch {
             try {
                 ensureGuid()
+                // 身份用「操作前后差集」确定，而不是按名字猜：LR002 只回 202 不给 id，
+                // 名字可能重名。差集恰好 1 个才认领；否则不提供"取消收藏"这个破坏性动作。
+                val beforeIds = runCatching { withSession { api().fetchMyRecipes() }.recipes.map { it.id }.toSet() }
+                    .getOrDefault(emptySet())
                 withSession {
                     api().saveToLibrary(
                         name = recipeName.ifBlank { "NiKConnect" },
@@ -99,13 +127,21 @@ internal class CloudFavoriteViewModel(
                     )
                 }
                 val mine = runCatching { withSession { api().fetchMyRecipes() } }.getOrNull()
-                val hit = mine?.recipes?.firstOrNull { it.name.equals(recipeName, ignoreCase = true) }
+                val added = mine?.recipes?.filterNot { it.id in beforeIds }.orEmpty()
+                val hit = when {
+                    added.size == 1 -> added.single()
+                    added.isEmpty() -> mine?.recipes
+                        ?.filter { it.name.equals(recipeName, ignoreCase = true) }
+                        ?.singleOrNull()
+                    else -> null
+                }
                 _state.update {
                     it.copy(
                         working = false,
                         collected = hit,
-                        placements = emptyList(),
-                        notice = "已收藏，可在账号页槽位「＋」里选它",
+                        placements = if (hit == null) Placements.Unknown else Placements.Known(emptyList()),
+                        notice = if (hit != null) "已收藏，可在账号页槽位「＋」里选它" else null,
+                        error = if (hit == null) "已提交收藏，但账号里没有唯一匹配的方案；请到账号页核对，别在这里直接删" else null,
                     )
                 }
             } catch (e: Exception) {
@@ -124,14 +160,16 @@ internal class CloudFavoriteViewModel(
             try {
                 ensureGuid()
                 withSession { api().removeFromLibrary(listOf(localId)) }
-                val cleared = _state.value.placements
-                val suffix = if (cleared.isEmpty()) "" else
-                    "，同时清空了 " + cleared.joinToString("、") { "${it.cameraName} 第 ${it.slot} 位" } + " 的槽位"
+                val cleared = (_state.value.placements as? Placements.Known)?.list.orEmpty()
+                val suffix = when {
+                    cleared.isEmpty() -> ""
+                    else -> "，同时清空了 " + cleared.joinToString("、") { "${it.cameraName} 第 ${it.slot} 位" } + " 的槽位"
+                }
                 _state.update {
                     it.copy(
                         working = false,
                         collected = null,
-                        placements = emptyList(),
+                        placements = Placements.Unknown,
                         notice = "已取消收藏$suffix",
                     )
                 }
@@ -150,6 +188,9 @@ internal class CloudFavoriteViewModel(
      * 用户并不知道这件事，所以必须在按钮旁与确认框里说出来。
      * 只用 `H13` 的 `camera[].recipeIds` 就能定位，不必逐台再拉 `C002`。
      */
+    private suspend fun loadPlacementsOrUnknown(localId: String): Placements =
+        runCatching { Placements.Known(loadPlacements(localId)) }.getOrDefault(Placements.Unknown)
+
     private suspend fun loadPlacements(localId: String): List<Placement> {
         if (localId.isBlank()) return emptyList()
         val cameras = withSession { api().listCameras() }

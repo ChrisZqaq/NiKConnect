@@ -117,11 +117,24 @@ internal fun CloudFavoriteBar(
         }
     }
 
-    if (state.placements.isNotEmpty()) {
-        Text(
-            "正在 " + state.placements.joinToString("、") { "${it.cameraName} 第 ${it.slot} 位" } + "的槽位上",
+    // 关联槽位是三态：查不到就说查不到，不能装作"没有关联"，否则用户会以为取消收藏无副作用。
+    when (val placement = state.placements) {
+        is Placements.Known -> if (placement.list.isNotEmpty()) {
+            Text(
+                "正在 " + placement.list.joinToString("、") { "${it.cameraName} 第 ${it.slot} 位" } + "的槽位上",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        is Placements.Loading -> Text(
+            "正在核对槽位占用…",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        is Placements.Unknown -> Text(
+            "槽位占用未核对（网络或登录问题），取消前请到账号页看一眼",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.error,
         )
     }
 
@@ -149,14 +162,18 @@ internal fun CloudFavoriteBar(
             onDismissRequest = { confirmRemove = false },
             title = { Text("取消收藏？") },
             text = {
-                val slots = state.placements
+                val slots = (state.placements as? Placements.Known)?.list
                 Text(
-                    if (slots.isEmpty()) {
-                        "会把「${collected.name}」从你的收藏里删掉。它当前没有排在任何相机槽位。"
-                    } else {
-                        "会把「${collected.name}」从收藏里删掉，并同时清空 " +
-                            slots.joinToString("、") { "${it.cameraName} 第 ${it.slot} 位" } +
-                            "的槽位（相机联网后会跟着变空）。"
+                    when {
+                        slots == null ->
+                            "会把「${collected.name}」从收藏里删掉。**槽位占用没核对成功**，" +
+                                "如果它排在某个相机槽位上，那位会被一起清空。"
+                        slots.isEmpty() ->
+                            "会把「${collected.name}」从你的收藏里删掉。它当前没有排在任何相机槽位。"
+                        else ->
+                            "会把「${collected.name}」从收藏里删掉，并同时清空 " +
+                                slots.joinToString("、") { "${it.cameraName} 第 ${it.slot} 位" } +
+                                "的槽位（相机联网后会跟着变空）。"
                     },
                 )
             },

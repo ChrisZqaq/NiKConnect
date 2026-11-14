@@ -69,6 +69,8 @@ class CloudFavoriteViewModelTest {
                 throw CloudException("IF_IR_R_LR002 HTTP 401", httpStatus = 401)
             }
             librarySave = Triple(name, resourceId, createdBy.toString())
+            // 真实 LR002 会把方案写进账号库；夹具必须同样反映，否则"操作前后差集"永远为空。
+            recipes = recipes + OwnedRecipe(id = "01NEWLOCAL", name = name)
             return "01NEWLOCAL"
         }
 
@@ -150,7 +152,10 @@ class CloudFavoriteViewModelTest {
         vm.loadCollection("Mid-Spring")
         advanceUntilIdle()
 
-        assertEquals(listOf(Placement(cameraName = "Zf", slot = 2)), vm.state.value.placements)
+        assertEquals(
+            Placements.Known(listOf(Placement(cameraName = "Zf", slot = 2))),
+            vm.state.value.placements,
+        )
     }
 
     @Test
@@ -168,7 +173,7 @@ class CloudFavoriteViewModelTest {
 
         val notice = vm.state.value.notice.orEmpty()
         assertTrue("notice was: $notice", notice.contains("Zf 第 2 位"))
-        assertTrue(vm.state.value.placements.isEmpty())
+        assertTrue(vm.state.value.placements is Placements.Unknown)
     }
 
     @Test

@@ -2,7 +2,9 @@ package com.chrisz.nikconnect.cloud
 
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -125,5 +127,38 @@ class CloudHttpTest {
     fun `token error response is not a success`() {
         assertNull(parseTokenResponse("""{"error":"invalid_grant","error_description":"Token is not active"}"""))
         assertNull(parseTokenResponse("<html>oops</html>"))
+    }
+}
+
+class RedactSecretsTest {
+    @Test
+    fun `form encoded credentials are redacted`() {
+        val raw = "grant_type=refresh_token&client_id=c0004&refresh_token=eyJhbGciOiJSUzI1NiJ9.abc.def"
+        val out = redactSecrets(raw)
+        assertTrue(out.contains("refresh_token=<redacted>"))
+        assertFalse(out.contains("eyJhbGciOiJSUzI1NiJ9"))
+    }
+
+    @Test
+    fun `json credentials are redacted`() {
+        val raw = """{"access_token":"eyJraWQiOiJ4","refresh_token":"r-123","expires_in":300}"""
+        val out = redactSecrets(raw)
+        assertFalse(out.contains("eyJraWQiOiJ4"))
+        assertFalse(out.contains("r-123"))
+        assertTrue(out.contains("\"access_token\":\"<redacted>\""))
+    }
+
+    @Test
+    fun `non credential payload is untouched`() {
+        val raw = """{"cameras":[{"deviceId":"01JTC8JSRZAW1B2FZZYGF8GYBW","name":"Zf"}]}"""
+        assertEquals(raw, redactSecrets(raw))
+    }
+
+    @Test
+    fun `auth call ids are recognised`() {
+        assertTrue(isAuthCallId("OIDC_CODE"))
+        assertTrue(isAuthCallId("OIDC_REFRESH"))
+        assertTrue(isAuthCallId("OIDC_USERINFO"))
+        assertFalse(isAuthCallId("IF_IR_R_C001"))
     }
 }

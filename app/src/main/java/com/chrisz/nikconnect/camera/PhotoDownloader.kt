@@ -57,7 +57,7 @@ internal class PhotoDownloader(
     private fun publishImage(part: File, photo: PhotoObject): Uri {
         val resolver = context.contentResolver
         // 同名同大小已存在 → 视为已下载，直接收下：否则 MediaStore 会另存成「名字 (1).JPG」，
-        // 同样的照片在相册里出现两份（真机踩过）。
+        // 同样的照片在相册里出现两份（真机踩过）。同名不同大小则视为**另一张照片**，并存不删。
         existingImage(photo)?.let { existing ->
             part.delete()
             return existing
@@ -90,7 +90,13 @@ internal class PhotoDownloader(
         }
     }
 
-    /** 相册里是否已有同名同大小的文件；大小不一致视为旧残件，删掉后重新写入。 */
+    /**
+     * 相册里是否已有**同名同大小**的文件。
+     *
+     * 只认「同名 + 同样字节数」这一种情况（激进口径：宁可复用，避免相册里堆 `(1)` 副本）。
+     * 同名但大小不同**绝不删除既有项目**——两张不同照片（换卡、换机身、编号回绕）都可能叫
+     * DSC_0001.JPG，删掉就是删用户的原始资产。让它并存，新文件由 MediaStore 自动加后缀。
+     */
     private fun existingImage(photo: PhotoObject): Uri? = runCatching {
         val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         val projection = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.SIZE)
@@ -103,7 +109,6 @@ internal class PhotoDownloader(
                 val size = cursor.getLong(1)
                 val uri = android.content.ContentUris.withAppendedId(collection, id)
                 if (size == photo.size) return@use uri
-                context.contentResolver.delete(uri, null, null)
             }
             null
         }
