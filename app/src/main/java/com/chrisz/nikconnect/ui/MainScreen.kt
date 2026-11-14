@@ -147,7 +147,7 @@ private fun NiKConnectContent(
             )
         },
         bottomBar = {
-            NavigationBar {
+            NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                 // 三个入口常驻：断线时「传输」仍要能看到已完成/失败的结果与原因，不该因为断开就消失。
                 NavigationBarItem(
                     selected = state.selectedTab == 0,

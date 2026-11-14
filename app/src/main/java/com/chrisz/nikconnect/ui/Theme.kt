@@ -15,6 +15,9 @@ private val Scheme = darkColorScheme(
     background = Color(0xFF12100E),
     surface = Color(0xFF1A1714),
     surfaceVariant = Color(0xFF221E1A),
+    // 底部导航选中态默认取 secondaryContainer，不指定会落到 Material 基线的紫色
+    secondaryContainer = Color(0xFF2E2822),
+    onSecondaryContainer = AccentGold,
     outline = Color(0xFF35312C),
     onBackground = Color(0xFFE9E5DC),
     onSurface = Color(0xFFE9E5DC),

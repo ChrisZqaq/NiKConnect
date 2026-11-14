@@ -105,6 +105,16 @@
 - 「金色只用于主动作」：金色是品牌色，章节标题沿用不算错；真正割裂的是底部 Tab 选中态来自 dynamic color 的紫色，单独统一即可（待做）。
 - 「卡片英文代号移进详情」：代号是唯一稳定标识，保留一行小字。
 
+
+## 2026-11-14 · 0.8.1：槽位选择器合并 + 面包屑 + 底部导航配色
+
+- `ui/CloudSlotPickerModel.kt`（新）：`PickerEntry(id, name, pictureControlName, slotIndex, inPool, libraryItem, poolItem)` + 纯函数 `pickerEntries(pool, library, slots)`（按 id 去重、按当前占用位排序、未占用排最后）+ `pickerLabel(entry, target)`（「已在此位／已在第 N 位／可添加」）。
+- `ui/CloudAccountScreen.kt` 的 `SlotPicker`：原来「可分配池」与「账号里的方案」两个独立列表合成一个 `LazyColumn`（`heightIn(max = 420.dp)`）；行右侧直接标状态，点到「已在此位」的行不再发请求；副标改「点一下只改草稿，还要按「保存排布」才写回账号」；空态改「账号里还没有可用方案。先去云创目录挑一个方案点「收藏」，它才会出现在这里。」。
+- 同一文件新增 `breadcrumb(cameraName)`（`云创 › 账号` / `云创 › 账号 › Zf`），二级页标题上方显示——这是「二级页保留底部导航」的替代方案。
+- `ui/Theme.kt`：补 `secondaryContainer = Color(0xFF2E2822)` / `onSecondaryContainer = AccentGold`；`ui/MainScreen.kt` 的 `NavigationBar(containerColor = surface)`。原先底部 Tab 选中态取 Material 基线的紫，是因为 scheme 没定义 `secondaryContainer`。
+- 验证：131 项 JVM 0 失败（新增 `CloudSlotPickerModelTest` 3 项，其中「占用位优先排序」首跑我写错了期望顺序，按 `slotIndex` 升序应为 C(2) → B(3)，已改正）；lint 0 errors / 6 warnings；`assembleDebug` 通过；`0.8.1-alpha` / versionCode 38；APK 57,483,832 字节 SHA-256 `e6aedec8defdeb762301617a7cee846b080b4f8e01238ed6be0dbbacab9648cd`。
+- **真机未验**：新手机（小米 24094RAD4C）已连上（USB `5X69TWO7HYMFB6R4` + 无线 `192.168.110.148:5555`），但 `adb install` 报 `INSTALL_FAILED_USER_RESTRICTED: Install canceled by user`——需要在开发者选项里打开「通过 USB 安装应用」（小米还要求登录小米账号、插入 SIM）。权限打开后即可 install + 逐页截图。
+
 ## 版本历史
 
 | 版本 | 内容 | 真机 | 验收记录 |

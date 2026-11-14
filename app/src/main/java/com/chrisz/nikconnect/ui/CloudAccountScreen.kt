@@ -113,14 +113,23 @@ internal fun CloudAccountScreen(
             IconButton(onClick = { if (state.selected != null) model.backToList() else onBack() }) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
             }
-            Text(
-                state.selected?.name ?: "云创账号",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
+            Column(Modifier.weight(1f)) {
+                // 二级页保留底部导航，靠这行说明"我在哪一层"
+                Text(
+                    breadcrumb(state.selected?.name),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    state.selected?.name ?: "云创账号",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             IconButton(onClick = model::refreshCameras, modifier = Modifier.size(48.dp)) {
                 Icon(Icons.Default.Refresh, contentDescription = "刷新")
             }
@@ -749,6 +758,11 @@ private fun SlotPicker(
     onRetry: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val entries = pickerEntries(
+        pool = state.assignable,
+        library = state.library?.recipes.orEmpty(),
+        slots = state.slots,
+    )
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
@@ -763,8 +777,8 @@ private fun SlotPicker(
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                "来源：账号可分配池（${state.assignable.size} 个）",
-                style = MaterialTheme.typography.labelMedium,
+                "点一下只改草稿，还要按「保存排布」才写回账号",
+                style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
@@ -772,68 +786,62 @@ private fun SlotPicker(
                 Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
                 }
+            } else if (entries.isEmpty()) {
+                Text(
+                    state.assignableError
+                        ?: "账号里还没有可用方案。先去云创目录挑一个方案点「收藏」，它才会出现在这里。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             } else {
-                if (state.assignable.isEmpty()) {
-                    Text(
-                        state.assignableError
-                            ?: "可分配池是空的。删空槽位后相机会把池子一起清掉，可以从下面账号里的方案直接加回来。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 240.dp)) {
-                        items(state.assignable, key = { it.id }) { recipe ->
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { onPick(recipe) }
-                                    .padding(vertical = 12.dp),
-                            ) {
-                                Text(recipe.name, style = MaterialTheme.typography.bodyMedium)
-                                if (recipe.pictureControlName.isNotBlank()) {
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
+                    items(entries, key = { it.id }) { entry ->
+                        val atTarget = entry.slotIndex == position + 1
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(enabled = !atTarget) {
+                                    val poolItem = entry.poolItem
+                                    val libraryItem = entry.libraryItem
+                                    when {
+                                        atTarget -> Unit
+                                        poolItem != null -> onPick(poolItem)
+                                        libraryItem != null -> onPickFromLibrary(libraryItem)
+                                    }
+                                }
+                                .padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(entry.name, style = MaterialTheme.typography.bodyMedium)
+                                if (entry.pictureControlName.isNotBlank()) {
                                     Text(
-                                        recipe.pictureControlName,
+                                        entry.pictureControlName,
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
                             }
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+                            Text(
+                                pickerLabel(entry, position),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (atTarget || entry.slotIndex != null) {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                } else {
+                                    MaterialTheme.colorScheme.primary
+                                },
+                            )
                         }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
                     }
                 }
-                val library = state.library?.recipes.orEmpty()
-                if (library.isNotEmpty()) {
-                    Text(
-                        "账号里的方案（${library.size} 个）· 点一下即加入相机并放到第 ${position + 1} 位",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 320.dp)) {
-                        items(library, key = { it.id }) { recipe ->
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { onPickFromLibrary(recipe) }
-                                    .padding(vertical = 12.dp),
-                            ) {
-                                Text(recipe.name, style = MaterialTheme.typography.bodyMedium)
-                                if (recipe.pictureControlName.isNotBlank()) {
-                                    Text(
-                                        recipe.pictureControlName,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
-                        }
-                    }
-                }
-                state.rawSnippet?.let { RawSnippet(it) }
-                TextButton(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) { Text("重新读取") }
             }
+            state.rawSnippet?.let { RawSnippet(it) }
+            TextButton(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) { Text("重新读取") }
         }
     }
 }
+
+/** 二级页层级提示：云创 › 账号 › 相机名。 */
+internal fun breadcrumb(cameraName: String?): String =
+    if (cameraName.isNullOrBlank()) "云创 › 账号" else "云创 › 账号 › $cameraName"
