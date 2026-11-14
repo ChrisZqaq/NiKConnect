@@ -88,6 +88,17 @@
 
 `docs/acceptance/0.4.md` 已填表并改写结论；PRD 的 D-09 行同步为真机通过。
 
+## 2026-11-14 · 0.9.0：照片链路全细节复测（相册去重 + 批量下载确认）
+
+按 12 项清单把照片链路从头点了一遍（`docs/acceptance/1.0-retest.md`），11 项通过、1 项部分（同连接内重试无法构造），期间挖出两个真问题：
+
+| 问题 | 证据 | 修法 |
+|---|---|---|
+| 同一张照片重复下载会生成 `DSC_9079 (1).JPG` 副本 | 目录里直接出现该文件；`.trashed-*` 中堆着历史遗留的几十份 `(1)` `(2)` 副本，合计 **889 MB** | `app/src/main/java/com/chrisz/nikconnect/camera/PhotoDownloader.kt` 新增 `existingImage(photo)`：插入前按 `DISPLAY_NAME + RELATIVE_PATH` 查相册，同名同大小直接复用（并删 `.part`），同名大小不同先删旧行再写 |
+| 全选 60 张无确认直接开下（约 1 GB） | 复测误触发，实下 9072–9079 共 8 组约 1 GB | `ui/MainScreen.kt` 的「下载所选」改为先弹 `AlertDialog`：`下载 N 个文件？共约 X MB`，超过 `BULK_CONFIRM_MB = 200L` 追加落盘位置提示 |
+
+复测后已把误下文件与 `.trashed-*` 清干净（889 MB → 24 MB），相册只留原有的 `DSC_9079.JPG` / `DSC_9079.NEF`。
+
 ## 2026-11-14 · 0.8.9：详情参数不再显示服务端字面量 `gamma`
 
 12 个方案抽样里有 5 个把 `contrast/highlight/shadow/whiteLevel/blackLevel` 返回成字面量 `"gamma"`（表示这根轴由曲线固定、不可调）。界面原来原样显示 `gamma`，用户看不懂。

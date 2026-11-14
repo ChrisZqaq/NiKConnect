@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -88,6 +89,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.chrisz.nikconnect.ptp.DeviceInfo
 import com.chrisz.nikconnect.ptp.PhotoObject
+
+// 一次下载超过这个体量先让用户确认（60 张 NEF 约 1 GB）。
+private const val BULK_CONFIRM_MB = 200L
 
 @Composable
 internal fun NiKConnectApp(model: MainViewModel) {
@@ -441,14 +445,41 @@ private fun GalleryScreen(
                             }) {
                                 Text(if (allSelected) "取消全选" else "全选")
                             }
+                            // 一次全选 60 张就是 0.9 GB 级别的流量（真机踩过），超过阈值先确认。
+                            val chosen = filteredPhotos.filter { it.handle in selected.value }
+                            var confirmBulk by remember { mutableStateOf(false) }
                             Button(
-                                onClick = {
-                                    onDownloadAll(filteredPhotos.filter { it.handle in selected.value })
-                                    exitSelection()
-                                },
+                                onClick = { confirmBulk = true },
                                 enabled = selected.value.isNotEmpty(),
                             ) {
                                 Text("下载所选 (${selected.value.size})")
+                            }
+                            if (confirmBulk) {
+                                val total = chosen.sumOf { it.size }
+                                val megabytes = total / (1024 * 1024)
+                                AlertDialog(
+                                    onDismissRequest = { confirmBulk = false },
+                                    title = { Text("下载 ${chosen.size} 个文件？") },
+                                    text = {
+                                        Text(
+                                            if (megabytes >= BULK_CONFIRM_MB) {
+                                                "共约 $megabytes MB，会全部保存到相册的 NiKConnect 文件夹。"
+                                            } else {
+                                                "共约 $megabytes MB。"
+                                            },
+                                        )
+                                    },
+                                    confirmButton = {
+                                        TextButton(onClick = {
+                                            confirmBulk = false
+                                            onDownloadAll(chosen)
+                                            exitSelection()
+                                        }) { Text("开始下载") }
+                                    },
+                                    dismissButton = {
+                                        TextButton(onClick = { confirmBulk = false }) { Text("取消") }
+                                    },
+                                )
                             }
                         }
                     }

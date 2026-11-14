@@ -13,8 +13,8 @@ android {
         applicationId = "com.chrisz.nikconnect"
         minSdk = 29
         targetSdk = 35
-        versionCode = 46
-        versionName = "0.8.9-alpha"
+        versionCode = 47
+        versionName = "0.9.0-alpha"
     }
 
     buildTypes {

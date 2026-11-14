@@ -56,6 +56,12 @@ internal class PhotoDownloader(
     /** 按 RAW/JPEG 选 MIME 发布到系统相册；文件名保留相机原始扩展名。 */
     private fun publishImage(part: File, photo: PhotoObject): Uri {
         val resolver = context.contentResolver
+        // 同名同大小已存在 → 视为已下载，直接收下：否则 MediaStore 会另存成「名字 (1).JPG」，
+        // 同样的照片在相册里出现两份（真机踩过）。
+        existingImage(photo)?.let { existing ->
+            part.delete()
+            return existing
+        }
         val isRaw = photo.isRaw && !photo.isJpeg
         val values = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, photo.filename)
@@ -83,6 +89,25 @@ internal class PhotoDownloader(
             throw error
         }
     }
+
+    /** 相册里是否已有同名同大小的文件；大小不一致视为旧残件，删掉后重新写入。 */
+    private fun existingImage(photo: PhotoObject): Uri? = runCatching {
+        val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val projection = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.SIZE)
+        val selection = "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND " +
+            "${MediaStore.MediaColumns.RELATIVE_PATH}=?"
+        val args = arrayOf(photo.filename, "Pictures/NiKConnect/")
+        context.contentResolver.query(collection, projection, selection, args, null)?.use { cursor ->
+            while (cursor.moveToNext()) {
+                val id = cursor.getLong(0)
+                val size = cursor.getLong(1)
+                val uri = android.content.ContentUris.withAppendedId(collection, id)
+                if (size == photo.size) return@use uri
+                context.contentResolver.delete(uri, null, null)
+            }
+            null
+        }
+    }.getOrNull()
 
     companion object {
         fun cleanupStalePartials(context: Context) {
