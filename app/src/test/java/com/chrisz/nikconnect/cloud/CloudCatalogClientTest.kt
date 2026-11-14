@@ -120,6 +120,27 @@ class CloudCatalogClientTest {
     }
 
     @Test
+    fun `detail exposes morning base params instead of hiding them`() {
+        // 真机/官网实测：baseName=MORNING 的方案（Bluegrain_jyota）用的是另一组字段
+        val raw = """
+            {"id":"01KH8Q3G1M2EHCJST14GS5Q7VR","name":"Bluegrain by jyota tomonori",
+             "pictureControlName":"Bluegrain_jyota",
+             "pictureControl":{"settingName":"Bluegrain_jyota","baseName":"MORNING",
+               "quickSharp":"-","effectLevel":"50","sharpening":"+2.75","middleRangeSharp":"+0.50",
+               "clarity":"+0.75","contrast":"0.00","brightness":"-","saturation":"+3.00","hue":"-3.00",
+               "filterEffect":"-","toning":"-","toningSaturation":"-"}}
+        """.trimIndent()
+        val detail = client().parseDetail(raw)
+        val labels = detail.params.map { it.label }
+        assertTrue(labels.contains("效果级别"))
+        assertTrue(labels.contains("色相"))
+        assertEquals("50", detail.params.first { it.label == "效果级别" }.value)
+        assertEquals("-3.00", detail.params.first { it.label == "色相" }.value)
+        // 未设置的 `-` 仍不显示
+        assertTrue(labels.none { it == "亮度" || it == "调色" })
+    }
+
+    @Test
     fun `detail throws on invalid json`() {
         try {
             client().parseDetail("""{"id": "broken""")

@@ -140,6 +140,13 @@ internal class CloudCatalogClient(
             "shadow" to "阴影",
             "whiteLevel" to "白色色阶",
             "blackLevel" to "黑色色阶",
+            // baseName=MORNING 这类方案（如 Bluegrain_jyota）会带另一组字段，早期版本会整段漏显示
+            "effectLevel" to "效果级别",
+            "hue" to "色相",
+            "brightness" to "亮度",
+            "filterEffect" to "滤镜效果",
+            "toning" to "调色",
+            "toningSaturation" to "调色饱和度",
         )
 
         internal val EXIF_LABELS = listOf(

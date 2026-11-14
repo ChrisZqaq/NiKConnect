@@ -56,6 +56,11 @@ internal class CloudException(
 internal class CloudHttp(
     private val minIntervalMillis: Long = 1_200,
     private val sleep: suspend (Long) -> Unit = { delay(it) },
+    /**
+     * 传输注入点：默认走 `HttpURLConnection`。JVM 测试用它伪造"频控 200 + 后续成功"，
+     * 从而在不联网的前提下验证退避重试整段逻辑（含业务码判定）。
+     */
+    private val perform: (suspend (HttpCall) -> String)? = null,
 ) {
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -139,6 +144,8 @@ internal class CloudHttp(
         contentType: String = "text/plain;charset=UTF-8",
         omitOrigin: Boolean = false,
     ): String {
+        val call = HttpCall(method, url, body, headers, callId, contentType, omitOrigin)
+        perform?.let { return it(call) }
         // 一律切到 IO：登录页在 Main 上直接调 post()，否则 HttpURLConnection 会抛
         // NetworkOnMainThreadException，而它的 message 是 null，日志里只剩「网络失败：null」。
         return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -315,3 +322,16 @@ internal fun parseTokenResponse(raw: String): Pair<String, String?>? {
     val refresh = element.str("refresh_token")?.trim()?.takeIf { it.isNotBlank() }
     return access to refresh
 }
+
+/**
+ * 一次 HTTP 调用的全部参数（供传输注入点使用）。
+ */
+internal data class HttpCall(
+    val method: String,
+    val url: String,
+    val body: String?,
+    val headers: Map<String, String>,
+    val callId: String,
+    val contentType: String = "text/plain;charset=UTF-8",
+    val omitOrigin: Boolean = false,
+)
