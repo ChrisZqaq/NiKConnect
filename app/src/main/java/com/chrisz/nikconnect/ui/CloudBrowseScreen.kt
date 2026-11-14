@@ -67,6 +67,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -158,13 +159,49 @@ internal fun CloudTab(
         }
 
         catalog.detailError != null -> DetailShell(onBack = model::closeDetail) {
+            var showDiagnostics by remember { mutableStateOf(false) }
             Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.padding(32.dp),
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 32.dp),
             ) {
-                Text(catalog.detailError!!, style = MaterialTheme.typography.bodyMedium)
-                Button(onClick = { catalog.detailRequestId?.let(model::openDetail) }) { Text("重试") }
+                val looksOffline = catalog.detailError!!.contains("resolve host", ignoreCase = true) ||
+                    catalog.detailError!!.contains("network", ignoreCase = true) ||
+                    catalog.detailError!!.contains("timeout", ignoreCase = true)
+                Text(
+                    if (looksOffline) "云端内容加载失败，请检查网络后重试" else "方案详情没有打开",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    if (looksOffline) {
+                        "浏览目录用不到登录；只有收藏和排槽位才需要。可以先用手机网络打开这一页，或稍后再试。"
+                    } else {
+                        "可能是这条方案刚被下架，或账号状态变了。回到列表再试一次即可。"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Button(
+                        onClick = { catalog.detailRequestId?.let(model::openDetail) },
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    ) { Text("重试") }
+                    OutlinedButton(
+                        onClick = model::closeDetail,
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    ) { Text("返回列表") }
+                }
+                TextButton(onClick = { showDiagnostics = !showDiagnostics }) {
+                    Text(if (showDiagnostics) "收起诊断" else "诊断")
+                }
+                if (showDiagnostics) {
+                    Text(
+                        catalog.detailError!!,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
 

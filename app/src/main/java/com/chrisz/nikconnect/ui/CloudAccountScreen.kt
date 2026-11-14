@@ -148,8 +148,9 @@ internal fun CloudAccountScreen(
                     shape = RoundedCornerShape(12.dp),
                 ) { Text("重新登录云创") }
                 Spacer(Modifier.width(10.dp))
+                // 不再解释 access_token 的生命周期：用户只需要知道「点一下续上」（UI 审查 2 · P2）。
                 Text(
-                    "尼康云创的 access_token 只有几十分钟，过点一次即可续上",
+                    "登录状态已过期，点一下即可续上",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),

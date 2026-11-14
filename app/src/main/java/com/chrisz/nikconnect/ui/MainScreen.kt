@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
@@ -48,6 +50,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -55,6 +58,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -131,17 +136,26 @@ private fun NiKConnectContent(
     onCloudLogout: () -> Unit,
     thumbnailLoader: suspend (Long) -> ByteArray,
 ) {
+    val context = LocalContext.current
+    val onOpenInAlbum: (DownloadItem) -> Unit = { item -> openInAlbum(context, item.photo.filename) }
     val connected = state.connectionStatus == ConnectionStatus.CONNECTED
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("NIKCONNECT", fontWeight = FontWeight.Black) },
                 actions = {
-                    if (connected) {
-                        IconButton(onClick = onRefresh) {
-                            Icon(Icons.Default.Refresh, contentDescription = "刷新照片")
+                    // 顶栏动作跟着当前 Tab 走：传输页刷新照片没有意义，云创页更不该出现相机断开（UI 审查 2 · P1）。
+                    when {
+                        state.selectedTab == 0 && connected -> {
+                            IconButton(onClick = onRefresh) {
+                                Icon(Icons.Default.Refresh, contentDescription = "刷新照片")
+                            }
+                            TextButton(onClick = onDisconnect) { Text("断开") }
                         }
-                        TextButton(onClick = onDisconnect) { Text("断开") }
+                        state.selectedTab == 1 && connected -> {
+                            TextButton(onClick = onDisconnect) { Text("断开") }
+                        }
+                        else -> Unit
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -161,7 +175,18 @@ private fun NiKConnectContent(
                 NavigationBarItem(
                     selected = state.selectedTab == 1,
                     onClick = { onTab(1) },
-                    icon = { Icon(Icons.Default.Download, contentDescription = null) },
+                    icon = {
+                        val running = state.downloads.count {
+                            it.status == DownloadStatus.WAITING || it.status == DownloadStatus.DOWNLOADING
+                        }
+                        if (running > 0) {
+                            BadgedBox(badge = { Badge { Text(running.toString()) } }) {
+                                Icon(Icons.Default.Download, contentDescription = null)
+                            }
+                        } else {
+                            Icon(Icons.Default.Download, contentDescription = null)
+                        }
+                    },
                     label = { Text("传输") },
                 )
                 NavigationBarItem(
@@ -183,7 +208,13 @@ private fun NiKConnectContent(
                     cloudRefreshToken = state.cloudRefreshToken,
                 )
                 // 传输页与连接状态解耦：断线后仍可查看结果、失败原因与重试入口
-                state.selectedTab == 1 -> TransferScreen(state, onRetryDownload, onCancelDownload, onGoPhotos = { onTab(0) })
+                state.selectedTab == 1 -> TransferScreen(
+                    state = state,
+                    onRetry = onRetryDownload,
+                    onCancel = onCancelDownload,
+                    onGoPhotos = { onTab(0) },
+                    onOpenInAlbum = onOpenInAlbum,
+                )
                 connected -> GalleryScreen(state, onDownload, onDownloadAll, onLoadMore, onViewTier, thumbnailLoader)
                 else -> ConnectionScreen(state, onConnect)
             }
@@ -318,12 +349,34 @@ private fun GalleryScreen(
                 }
             }
             if (filteredPhotos.isNotEmpty()) {
-                TextButton(onClick = {
-                    onViewTier((viewTier + 1) % VIEW_TIERS.size)
-                }) {
-                    Icon(Icons.Default.GridView, contentDescription = "切换视图大小")
-                    Spacer(Modifier.width(4.dp))
-                    Text(VIEW_TIERS[viewTier])
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // 选择入口做显式按钮：之前只能长按发现，批量下载等于不存在（UI 审查 2 · P2）。
+                    TextButton(
+                        onClick = {
+                            if (selectionMode) exitSelection() else {
+                                selectionMode = true
+                                selected.value = emptySet()
+                            }
+                        },
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    ) { Text(if (selectionMode) "完成" else "选择") }
+                    // 视图改成三段直选：循环按钮要连点两次才知道顺序（UI 审查 2 · P2）。
+                    VIEW_TIERS.forEachIndexed { index, label ->
+                        TextButton(
+                            onClick = { onViewTier(index) },
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        ) {
+                            Text(
+                                label,
+                                color = if (viewTier == index) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                fontWeight = if (viewTier == index) FontWeight.SemiBold else FontWeight.Normal,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -339,12 +392,29 @@ private fun GalleryScreen(
             state.photos.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("暂无照片", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            filteredPhotos.isEmpty() -> Column(
+                modifier = Modifier.fillMaxSize().padding(32.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    if (filter == "RAW") "这台相机没有 RAW 照片" else "没有 JPEG 照片",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(12.dp))
+                TextButton(onClick = { filter = "全部" }) { Text("查看全部照片") }
+            }
             else -> Box(Modifier.fillMaxSize()) {
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = viewMinSize),
-                    contentPadding = PaddingValues(16.dp, if (selectionMode) 16.dp else 16.dp, 16.dp, if (selectionMode) 96.dp else 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(
+                        start = if (viewTier == 2) 6.dp else 16.dp,
+                        top = 8.dp,
+                        end = if (viewTier == 2) 6.dp else 16.dp,
+                        bottom = if (selectionMode) 96.dp else 16.dp,
+                    ),
+                    horizontalArrangement = Arrangement.spacedBy(if (viewTier == 2) 4.dp else 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(if (viewTier == 2) 4.dp else 12.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     items(filteredPhotos, key = { it.handle }) { photo ->
@@ -361,7 +431,7 @@ private fun GalleryScreen(
                         }
                         PhotoCard(
                             photo = photo,
-                            compact = viewTier == 2,
+                            viewTier = viewTier,
                             downloaded = photo.handle in completedHandles,
                             selectionMode = selectionMode,
                             isSelected = photo.handle in selected.value,
@@ -481,7 +551,7 @@ private fun GalleryScreen(
 @Composable
 private fun PhotoCard(
     photo: PhotoObject,
-    compact: Boolean,
+    viewTier: Int,
     downloaded: Boolean,
     selectionMode: Boolean,
     isSelected: Boolean,
@@ -497,78 +567,91 @@ private fun PhotoCard(
     val bitmap = remember(bytes) {
         bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
     }
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) {
-                MaterialTheme.colorScheme.secondaryContainer
-            } else {
-                MaterialTheme.colorScheme.surfaceVariant
-            },
-        ),
-        modifier = Modifier.combinedClickable(
-            onClick = {
-                when {
-                    selectionMode && onToggleSelect != null -> onToggleSelect(photo.handle)
-                    !selectionMode && onOpen != null -> onOpen()
-                }
-            },
-            onLongClick = { onLongPress?.invoke() },
-        ),
+    val tier = viewTier.coerceIn(0, 2)
+    // 大视图：照片是主体，信息压成一行，下载做成角上的小动作；
+    // 中/小视图：完全去掉文字面板，只留角标（UI 审查 2 · P1）。
+    val aspect = when (tier) {
+        0 -> 1.35f
+        1 -> 1f
+        else -> 1f
+    }
+    val badgeSize = if (tier == 2) 16.dp else 20.dp
+
+    Column(
+        modifier = Modifier
+            .clip(RoundedCornerShape(if (tier == 2) 4.dp else 12.dp))
+            .background(
+                if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
+            )
+            .combinedClickable(
+                onClick = {
+                    when {
+                        selectionMode && onToggleSelect != null -> onToggleSelect(photo.handle)
+                        !selectionMode && onOpen != null -> onOpen()
+                    }
+                },
+                onLongClick = { onLongPress?.invoke() },
+            ),
     ) {
-        Column {
-            Box(
-                modifier = Modifier.fillMaxWidth().aspectRatio(if (compact) 1f else 1.35f).background(MaterialTheme.colorScheme.surface),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (bitmap != null) {
-                    Image(
-                        bitmap = bitmap!!,
-                        contentDescription = photo.filename,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop,
-                    )
-                } else {
-                    Text(if (photo.isRaw) "NEF" else "JPEG", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                if (downloaded) {
-                    Icon(
-                        imageVector = Icons.Default.CheckCircle,
-                        contentDescription = "已下载",
-                        modifier = Modifier.align(Alignment.BottomStart).padding(6.dp),
-                        tint = MaterialTheme.colorScheme.secondary,
-                    )
-                }
-                if (selectionMode) {
-                    Icon(
-                        imageVector = if (isSelected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
-                        contentDescription = if (isSelected) "已选中" else "未选中",
-                        modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
-                        tint = if (isSelected) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                        },
-                    )
-                }
-            }
-            if (!compact) Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text(photo.filename, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(aspect)
+                .background(MaterialTheme.colorScheme.surface),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap!!,
+                    contentDescription = photo.filename,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+            } else {
                 Text(
-                    formatBytes(photo.size),
-                    style = MaterialTheme.typography.bodySmall,
+                    if (photo.isRaw) "NEF" else "JPEG",
+                    style = if (tier == 2) MaterialTheme.typography.labelSmall else MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (!selectionMode) {
-                    Button(
-                        onClick = { onDownload(photo) },
-                        enabled = photo.isJpeg || photo.isRaw,
-                        modifier = Modifier.fillMaxWidth(),
-                        contentPadding = PaddingValues(horizontal = 8.dp),
-                    ) {
-                        Text(if (photo.isJpeg || photo.isRaw) "下载" else "暂不支持")
-                    }
+            }
+            if (downloaded) {
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = "已下载",
+                    modifier = Modifier.align(Alignment.TopStart).padding(if (tier == 2) 2.dp else 6.dp).size(badgeSize),
+                    tint = MaterialTheme.colorScheme.secondary,
+                )
+            }
+            if (selectionMode) {
+                Icon(
+                    imageVector = if (isSelected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                    contentDescription = if (isSelected) "已选中" else "未选中",
+                    modifier = Modifier.align(Alignment.TopEnd).padding(if (tier == 2) 2.dp else 6.dp).size(badgeSize),
+                    tint = if (isSelected) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    },
+                )
+            }
+            if (tier == 0 && !selectionMode && !downloaded && (photo.isJpeg || photo.isRaw)) {
+                FilledIconButton(
+                    onClick = { onDownload(photo) },
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp).size(40.dp),
+                ) {
+                    Icon(Icons.Default.Download, contentDescription = "下载 ${photo.filename}")
                 }
             }
+        }
+        if (tier == 0) {
+            Text(
+                "${photo.filename} · ${formatBytes(photo.size)}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            )
         }
     }
 }
@@ -607,7 +690,13 @@ private fun PhotoViewer(
             color = MaterialTheme.colorScheme.background,
             modifier = Modifier.fillMaxSize(),
         ) {
-            Column(Modifier.fillMaxSize()) {
+            // 全屏 Dialog 不会自动让开系统栏：不补 inset 时底部按钮会被手势条/三键导航压住（UI 审查 2 · P0）。
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding(),
+            ) {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -629,18 +718,26 @@ private fun PhotoViewer(
                     }
                 }
                 Row(
-                    Modifier.fillMaxWidth().padding(16.dp),
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    OutlinedButton(onClick = onSelect, modifier = Modifier.weight(1f).height(52.dp)) {
+                    TextButton(onClick = onSelect, modifier = Modifier.heightIn(min = 48.dp)) {
                         Text("选择此照片")
                     }
+                    Spacer(Modifier.weight(1f))
                     Button(
                         onClick = onDownload,
                         enabled = !downloaded && (photo.isJpeg || photo.isRaw),
-                        modifier = Modifier.weight(1f).height(52.dp),
+                        modifier = Modifier.heightIn(min = 48.dp),
                     ) {
-                        Text(if (downloaded) "已下载" else if (photo.isJpeg || photo.isRaw) "下载这张" else "暂不支持")
+                        Text(
+                            when {
+                                downloaded -> "已保存到相册"
+                                photo.isJpeg || photo.isRaw -> "下载这张"
+                                else -> "暂不支持"
+                            },
+                        )
                     }
                 }
             }
@@ -654,20 +751,8 @@ private fun TransferScreen(
     onRetry: (Long) -> Unit,
     onCancel: (Long) -> Unit,
     onGoPhotos: () -> Unit,
+    onOpenInAlbum: (DownloadItem) -> Unit,
 ) {
-    if (state.downloads.isNotEmpty()) {
-        val done = state.downloads.count { it.status == DownloadStatus.COMPLETED }
-        val failed = state.downloads.count { it.status == DownloadStatus.FAILED }
-        val active = state.downloads.count { it.status == DownloadStatus.WAITING || it.status == DownloadStatus.DOWNLOADING }
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            StatCard("传输中", active.toString())
-            StatCard("已完成", done.toString())
-            StatCard("失败", failed.toString())
-        }
-    }
     if (state.downloads.isEmpty()) {
         Column(
             modifier = Modifier.fillMaxSize().padding(32.dp),
@@ -687,73 +772,114 @@ private fun TransferScreen(
         }
         return
     }
+
+    // 统计摘要与任务列表必须同一个滚动容器：原先两者是 Box 里的兄弟节点，列表会盖住摘要（UI 审查 2 · P0）。
     LazyColumn(
-        contentPadding = PaddingValues(20.dp),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        item(key = "summary") {
+            val done = state.downloads.count { it.status == DownloadStatus.COMPLETED }
+            val failed = state.downloads.count { it.status == DownloadStatus.FAILED }
+            val active = state.downloads.count {
+                it.status == DownloadStatus.WAITING || it.status == DownloadStatus.DOWNLOADING
+            }
+            Text(
+                buildList {
+                    if (active > 0) add("进行中 $active")
+                    if (done > 0) add("已完成 $done")
+                    if (failed > 0) add("失败 $failed")
+                }.joinToString(" · ").ifBlank { "本次会话没有任务" },
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         items(state.downloads, key = { it.photo.handle }) { item ->
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(item.photo.filename, fontWeight = FontWeight.SemiBold)
+            DownloadRow(item = item, onRetry = onRetry, onCancel = onCancel, onOpenInAlbum = onOpenInAlbum)
+        }
+    }
+}
+
+@Composable
+private fun DownloadRow(
+    item: DownloadItem,
+    onRetry: (Long) -> Unit,
+    onCancel: (Long) -> Unit,
+    onOpenInAlbum: (DownloadItem) -> Unit,
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(item.photo.filename, fontWeight = FontWeight.SemiBold)
+                Text(
+                    when (item.status) {
+                        DownloadStatus.WAITING -> "排队中"
+                        DownloadStatus.DOWNLOADING -> "下载中"
+                        DownloadStatus.COMPLETED -> "已完成"
+                        DownloadStatus.FAILED -> "失败"
+                        DownloadStatus.CANCELLED -> "已取消"
+                    },
+                    color = if (item.status == DownloadStatus.FAILED) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
+                )
+            }
+            if (item.status == DownloadStatus.DOWNLOADING || item.status == DownloadStatus.COMPLETED) {
+                LinearProgressIndicator(
+                    progress = {
+                        if (item.photo.size == 0L) 0f else item.transferred.toFloat() / item.photo.size
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "${formatBytes(item.transferred)} / ${formatBytes(item.photo.size)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                when (item.status) {
+                    DownloadStatus.COMPLETED -> {
                         Text(
-                            when (item.status) {
-                                DownloadStatus.WAITING -> "排队中"
-                                DownloadStatus.DOWNLOADING -> "下载中"
-                                DownloadStatus.COMPLETED -> "已完成"
-                                DownloadStatus.FAILED -> "失败"
-                                DownloadStatus.CANCELLED -> "已取消"
-                            },
-                            color = if (item.status == DownloadStatus.FAILED) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.primary
-                            },
-                        )
-                    }
-                    if (item.status == DownloadStatus.DOWNLOADING || item.status == DownloadStatus.COMPLETED) {
-                        LinearProgressIndicator(
-                            progress = {
-                                if (item.photo.size == 0L) 0f else item.transferred.toFloat() / item.photo.size
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Text(
-                            "${formatBytes(item.transferred)} / ${formatBytes(item.photo.size)}",
-                            style = MaterialTheme.typography.bodySmall,
+                            "已保存到相册",
+                            modifier = Modifier.weight(1f),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
                         )
+                        TextButton(
+                            onClick = { onOpenInAlbum(item) },
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        ) { Text("在相册中查看") }
                     }
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        when (item.status) {
-                            DownloadStatus.COMPLETED -> Text(
-                                "已保存到相册",
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                            DownloadStatus.FAILED -> {
-                                Text(
-                                    item.error ?: "传输中断",
-                                    modifier = Modifier.weight(1f),
-                                    color = MaterialTheme.colorScheme.error,
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                                Button(onClick = { onRetry(item.photo.handle) }) {
-                                    Text("重试")
-                                }
-                            }
-                            DownloadStatus.WAITING, DownloadStatus.DOWNLOADING -> TextButton(
-                                onClick = { onCancel(item.photo.handle) },
-                            ) {
-                                Text("取消")
-                            }
-                            DownloadStatus.CANCELLED -> Button(onClick = { onRetry(item.photo.handle) }) {
-                                Text("重试")
-                            }
+                    DownloadStatus.FAILED -> {
+                        Text(
+                            item.error ?: "传输中断",
+                            modifier = Modifier.weight(1f),
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Button(onClick = { onRetry(item.photo.handle) }, modifier = Modifier.heightIn(min = 48.dp)) {
+                            Text("重试")
                         }
+                    }
+                    DownloadStatus.WAITING, DownloadStatus.DOWNLOADING -> TextButton(
+                        onClick = { onCancel(item.photo.handle) },
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    ) {
+                        Text("取消")
+                    }
+                    DownloadStatus.CANCELLED -> Button(
+                        onClick = { onRetry(item.photo.handle) },
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    ) {
+                        Text("重试")
                     }
                 }
             }
@@ -761,6 +887,40 @@ private fun TransferScreen(
     }
 }
 
+/**
+ * 「在相册中查看」：按文件名反查 MediaStore，再用系统图库打开。
+ * 不存 Uri 的原因：重装/清数据后 Uri 会失效，而文件名+相册目录是稳定的。
+ */
+private fun openInAlbum(context: android.content.Context, filename: String) {
+    val uri = runCatching {
+        context.contentResolver.query(
+            android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            arrayOf(android.provider.MediaStore.MediaColumns._ID),
+            "${android.provider.MediaStore.MediaColumns.DISPLAY_NAME}=?",
+            arrayOf(filename),
+            null,
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                android.content.ContentUris.withAppendedId(
+                    android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    cursor.getLong(0),
+                )
+            } else {
+                null
+            }
+        }
+    }.getOrNull()
+    if (uri == null) {
+        android.widget.Toast.makeText(context, "相册里没找到这张照片", android.widget.Toast.LENGTH_SHORT).show()
+        return
+    }
+    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+        setDataAndType(uri, "image/*")
+        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    runCatching { context.startActivity(intent) }
+        .onFailure { android.widget.Toast.makeText(context, "没有可用的相册应用", android.widget.Toast.LENGTH_SHORT).show() }
+}
 
 /**
  * 连接失败：先说人话和下一步，技术异常收进「诊断详情」。
@@ -791,22 +951,16 @@ private fun ConnectionErrorCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(
-                    onClick = {
-                        val intent = android.content.Intent(android.provider.Settings.ACTION_WIFI_SETTINGS)
-                        runCatching { context.startActivity(intent) }
-                    },
-                    modifier = Modifier.weight(1f).height(48.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp),
-                ) {
-                    Text("Wi-Fi 设置", maxLines = 1, style = MaterialTheme.typography.labelLarge)
-                }
-                Button(
-                    onClick = onRetry,
-                    // 连不上时 lastHost 可能为空（首次是自动发现），重试要能重新发现，不能因为没记住 IP 就禁用
-                    modifier = Modifier.weight(1f).height(48.dp),
-                ) { Text("重试", maxLines = 1) }
+            // 主按钮在卡片下方已经负责「重新连接」，卡里不再放第二个重试入口（UI 审查 2 · P2）。
+            OutlinedButton(
+                onClick = {
+                    val intent = android.content.Intent(android.provider.Settings.ACTION_WIFI_SETTINGS)
+                    runCatching { context.startActivity(intent) }
+                },
+                modifier = Modifier.heightIn(min = 48.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp),
+            ) {
+                Text("打开 Wi-Fi 设置", maxLines = 1, style = MaterialTheme.typography.labelLarge)
             }
             TextButton(
                 onClick = { showDiagnostics = !showDiagnostics },

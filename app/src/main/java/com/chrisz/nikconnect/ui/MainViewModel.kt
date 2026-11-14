@@ -176,7 +176,9 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
                 loadingMore = false,
                 hasMore = false,
                 error = null,
-                downloads = emptyList(),
+                // 只清「本次未完成」的任务：已完成的结果是用户刚拿到的产出，
+                // 重连就抹掉会让人以为白传了（UI 审查 2 · P1）。
+                downloads = it.downloads.filter { item -> item.status == DownloadStatus.COMPLETED },
                 downloadedFilenames = emptySet(),
             )
         }
