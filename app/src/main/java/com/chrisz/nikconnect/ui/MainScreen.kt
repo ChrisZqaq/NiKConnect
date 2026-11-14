@@ -224,7 +224,7 @@ private fun ConnectionScreen(state: UiState, onConnect: (String) -> Unit) {
         state.error?.let { message ->
             ConnectionErrorCard(
                 message = message,
-                canRetry = state.lastHost != null && !connecting,
+                canRetry = !connecting,
                 onRetry = { onConnect(state.lastHost ?: "") },
             )
         }
@@ -779,12 +779,15 @@ private fun ConnectionErrorCard(
                         runCatching { context.startActivity(intent) }
                     },
                     modifier = Modifier.weight(1f).height(48.dp),
-                ) { Text("打开 Wi-Fi 设置") }
+                    contentPadding = PaddingValues(horizontal = 12.dp),
+                ) {
+                    Text("Wi-Fi 设置", maxLines = 1, style = MaterialTheme.typography.labelLarge)
+                }
                 Button(
                     onClick = onRetry,
-                    enabled = canRetry,
+                    // 连不上时 lastHost 可能为空（首次是自动发现），重试要能重新发现，不能因为没记住 IP 就禁用
                     modifier = Modifier.weight(1f).height(48.dp),
-                ) { Text("重试") }
+                ) { Text("重试", maxLines = 1) }
             }
             TextButton(
                 onClick = { showDiagnostics = !showDiagnostics },

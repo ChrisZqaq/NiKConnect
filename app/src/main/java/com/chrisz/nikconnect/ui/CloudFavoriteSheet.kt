@@ -57,7 +57,8 @@ internal fun CloudFavoriteBar(
             shape = RoundedCornerShape(12.dp),
         ) {
             Icon(Icons.Filled.BookmarkAdded, contentDescription = null, modifier = Modifier.size(18.dp))
-            Text("  登录云创后可收藏", style = MaterialTheme.typography.labelLarge)
+            // 未登录时把两个能力合成一句，避免出现两个"登录后…"按钮
+            Text("  登录云创后可收藏 · 加到相机", style = MaterialTheme.typography.labelLarge)
         }
         return
     }

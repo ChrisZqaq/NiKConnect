@@ -115,6 +115,23 @@
 - 验证：131 项 JVM 0 失败（新增 `CloudSlotPickerModelTest` 3 项，其中「占用位优先排序」首跑我写错了期望顺序，按 `slotIndex` 升序应为 C(2) → B(3)，已改正）；lint 0 errors / 6 warnings；`assembleDebug` 通过；`0.8.1-alpha` / versionCode 38；APK 57,483,832 字节 SHA-256 `e6aedec8defdeb762301617a7cee846b080b4f8e01238ed6be0dbbacab9648cd`。
 - **真机未验**：新手机（小米 24094RAD4C）已连上（USB `5X69TWO7HYMFB6R4` + 无线 `192.168.110.148:5555`），但 `adb install` 报 `INSTALL_FAILED_USER_RESTRICTED: Install canceled by user`——需要在开发者选项里打开「通过 USB 安装应用」（小米还要求登录小米账号、插入 SIM）。权限打开后即可 install + 逐页截图。
 
+
+## 2026-11-14 · 0.8.2：真机首轮验证（HyperOS）+ 三处修正
+
+设备：小米 24094RAD4C / HyperOS V816，`adb install` 需要在开发者选项打开「USB 安装」后才成功（`INSTALL_FAILED_USER_RESTRICTED`）。
+
+**已在真机确认**
+- 连接页只剩一处品牌（`01-connection.png`）；传输空态带「去选择照片」（`04-transfer-empty.png`）；云创目录 144 方案与封面正常（`05-cloud-catalog.png`）。
+- 连接失败态：主文案「没找到相机」+ 检查清单 + 三动作；诊断展开显示 `failed to connect to /192.168.1.1 (port 15740) ... ECONNREFUSED`（`02`/`03`）。
+- 底部 Tab 选中态已从 Material 基线紫变为金色胶囊（`Theme.kt` 补 `secondaryContainer` 生效）。
+
+**真机暴露并已修的三处**
+1. 首次连接失败时「重试」是禁用的（`canRetry = state.lastHost != null`，而自动发现路径下 `lastHost` 为空）→ 改 `canRetry = !connecting`。
+2. 「打开 Wi-Fi 设置」在 1080×2400 上折成两行 → 文案改「Wi-Fi 设置」+ `maxLines = 1` + `contentPadding`。
+3. 未登录时 `CloudFavoriteBar` 提前 `return`，导致详情页完全没有「加到相机」入口 → 未登录合成一句「登录云创后可收藏 · 加到相机」。
+
+**仍待真机（需登录态）**：账号页三处折叠、槽位选择器合并列表、「加到相机」真实链路（`LR002 → H05 → C003 → H13 → C004`）、Wi-Fi 设置跳转复测。
+
 ## 版本历史
 
 | 版本 | 内容 | 真机 | 验收记录 |
