@@ -46,7 +46,9 @@ internal class CameraRepository(context: Context) : Closeable {
             }
             val candidates = buildList {
                 if (manualHost.isNotBlank()) add(manualHost.trim())
-                network.gateway?.let(::add)
+                // 空串/0.0.0.0 会被 InetAddress 解析成 localhost，白等一个 10 s 超时，
+                // 而且它的错误会盖掉真正有用的那条（真机踩过：报 "connect to localhost:15740"）。
+                network.gateway?.trim()?.takeIf { it.isNotEmpty() && it != "0.0.0.0" }?.let(::add)
                 add("192.168.1.1")
             }.distinct()
             var lastError: IOException? = null
@@ -73,7 +75,7 @@ internal class CameraRepository(context: Context) : Closeable {
                         if (generation == ticket && connectingClient === camera) connectingClient = null
                     }
                     ensureGeneration(ticket)
-                    lastError = error
+                    if (!host.startsWith("127.") && host != "localhost") lastError = error
                 }
             }
             throw lastError ?: IOException("未找到相机，请检查 Wi-Fi 连接")
