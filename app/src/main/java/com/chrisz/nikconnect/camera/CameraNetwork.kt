@@ -54,11 +54,14 @@ internal class CameraNetworkAcquisition(
 
     fun await(): CameraNetworkHandle {
         ensureActive()
-        connectivityManager.activeNetwork?.let { active ->
-            val capabilities = connectivityManager.getNetworkCapabilities(active)
-            if (capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true) {
-                return CameraNetworkHandle(gateway(active), active, connectivityManager, null)
-            }
+        // 相机热点没有外网，系统常把蜂窝当成默认网络，activeNetwork 于是不是 Wi-Fi。
+        // 直接枚举已连上的 Wi-Fi 网络，别指望 activeNetwork，也别等 requestNetwork 回调
+        // （真机踩过：明明连着 NIKON_Z_f_32632，却报「未找到相机 Wi-Fi，请先连接」）。
+        connectivityManager.allNetworks.firstOrNull { network ->
+            connectivityManager.getNetworkCapabilities(network)
+                ?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+        }?.let { wifi ->
+            return CameraNetworkHandle(gateway(wifi), wifi, connectivityManager, null)
         }
 
         val networkCallback = object : ConnectivityManager.NetworkCallback() {

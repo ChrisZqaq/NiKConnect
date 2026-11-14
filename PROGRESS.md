@@ -88,6 +88,14 @@
 
 `docs/acceptance/0.4.md` 已填表并改写结论；PRD 的 D-09 行同步为真机通过。
 
+## 2026-11-14 · 0.9.2：连着相机 Wi-Fi 却报「未找到相机 Wi-Fi」
+
+真机现象：手机 SSID 明明是 `NIKON_Z_f_32632`、`192.168.1.2`、`nc -z 192.168.1.1 15740` 通，App 却报「未找到相机 Wi-Fi，请先连接」。
+
+根因：`CameraNetworkAcquisition.await()` 先看 `connectivityManager.activeNetwork` 是不是 Wi-Fi。相机热点没有外网，ColorOS 把**蜂窝**当默认网络，于是 activeNetwork 不是 Wi-Fi；接着走 `requestNetwork(TRANSPORT_WIFI - INTERNET)` 等回调，12 秒内回调不来就抛"未找到相机 Wi-Fi"。
+
+修法：改为枚举 `connectivityManager.allNetworks`，挑第一个 `hasTransport(TRANSPORT_WIFI)` 的网络直接用（回调路径保留作兜底）。真机复验：同条件下点「重新连接 192.168.1.1」直接进图库。
+
 ## 2026-11-14 · 0.9.1：连接失败不再被 localhost 误导
 
 `CameraRepository.connect` 的候选主机列表里，`network.gateway` 可能返回空串或 `0.0.0.0`；空串经 `InetAddress` 解析成 **localhost**，于是：
