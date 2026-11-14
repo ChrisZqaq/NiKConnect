@@ -232,7 +232,8 @@ fun CloudLoginScreen(
             }
             return
         }
-        if (cb.state.isNotBlank() && cb.state != oidcState) return
+        // CSRF：state 必须存在且与本机生成的完全一致。原来"空 state 就放行"等于没校验。
+        if (cb.state.isBlank() || cb.state != oidcState) return
         val verifier = oidcVerifier
         runCatching { android.util.Log.d("NikConnect", "oidc code received") }
         scope.launch {
@@ -286,7 +287,7 @@ fun CloudLoginScreen(
         if (g.isNotEmpty() && capturedGuid.isEmpty()) capturedGuid = g
         if (t.length <= 40 || capturedToken.isNotEmpty()) return
         capturedToken = t
-        runCatching { android.util.Log.d("NikConnect", "token captured: ${t.take(12)}…") }
+        runCatching { android.util.Log.d("NikConnect", "token captured len=${t.length}") }
         runCatching { android.util.Log.d("NikConnect", "spa-token ${CloudCapture.jwtSummary(t)}") }
         // 顺手把 keycloak 的 refresh_token 读出来：拿不到就照旧返回（只是少了自动续期）
         webView?.evaluateJavascript(REFRESH_PROBE_JS) { raw ->
@@ -345,11 +346,15 @@ fun CloudLoginScreen(
             factory = { ctx ->
                 WebView(ctx).apply {
                     settings.javaScriptEnabled = true
-                    // 允许 chrome://inspect 连上这个 WebView：登录流程出问题时能直接看控制台
-                    WebView.setWebContentsDebuggingEnabled(true)
+                    // 只有 debuggable 包才允许 chrome://inspect 连进来；release 里开着等于把
+                    // 登录页的 DOM 与存储暴露给同一台电脑上的任何 adb 使用者（评审 F13）。
+                    val debuggable = (ctx.applicationInfo.flags and
+                        android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+                    WebView.setWebContentsDebuggingEnabled(debuggable)
                     // 把页面 console 转进 logcat：调试构建里用来观察页面上下文发起的请求结果
                     webChromeClient = object : android.webkit.WebChromeClient() {
                         override fun onConsoleMessage(msg: android.webkit.ConsoleMessage): Boolean {
+                            if (!debuggable) return true
                             runCatching {
                                 android.util.Log.d("NikConnect", "console ${msg.message()}")
                             }

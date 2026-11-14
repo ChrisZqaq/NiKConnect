@@ -306,6 +306,13 @@
 
 验证：149 项 JVM 测试 0 失败、lint 0 error / 6 warning；`0.10.3-alpha` / versionCode 54。
 
+## 2026-11-14 · 0.10.4：F08 队列生命周期 + F13 登录页安全
+
+- **F08 队列跟着宿主活**：`ui/DownloadQueue.kt` 的 `SupervisorJob()` 原来**无父**，宿主作用域被取消后泵协程仍在跑、可能继续往相册发布。改为 `SupervisorJob(scope.coroutineContext[Job])`，Supervisor 语义（单任务失败不牵连其它任务）保留。
+- **F13 登录页三处**：`ui/CloudLoginScreen.kt` ① `WebView.setWebContentsDebuggingEnabled(debuggable)`——按 `ApplicationInfo.FLAG_DEBUGGABLE` 取运行时值，release 不再对 `chrome://inspect` 开放；② 页面 console 转发也只在 debuggable 生效；③ 日志 `token captured: ${t.take(12)}…` 改为 `token captured len=${t.length}`（不再打印 token 前缀）；④ OIDC 回调的 state 校验从「非空且不匹配才拒」改为「必须非空且严格等于本机生成值」，空 state 不再放行。
+
+验证：149 项 JVM 测试 0 失败、lint 0 error / 6 warning；`0.10.4-alpha` / versionCode 55。
+
 ## 版本历史
 
 | 版本 | 内容 | 真机 | 验收记录 |

@@ -45,7 +45,12 @@ internal class DownloadQueue(
     @Volatile
     private var runningTask: Job? = null
 
-    private val supervisor = SupervisorJob()
+    /**
+     * 泵的作用域必须挂在宿主作用域下：原来 `SupervisorJob()` 是**无父**的独立 Job，
+     * ViewModel 被清理后泵协程仍在跑，可能继续往相册发布（评审 F08）。
+     * Supervisor 语义保留（单个任务失败不影响其它任务），只是补上父级。
+     */
+    private val supervisor = SupervisorJob(scope.coroutineContext[Job])
     private val pumpScope = CoroutineScope(scope.coroutineContext + supervisor)
 
     /** 泵协程：从通道逐个取任务执行；单任务取消只取消执行体，泵本身存活。 */
