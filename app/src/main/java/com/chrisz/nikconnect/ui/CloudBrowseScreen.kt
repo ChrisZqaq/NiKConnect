@@ -315,6 +315,17 @@ private fun CloudBrowseContent(
             if (state.hasNew) {
                 SortLabel(text = "NEW", selected = state.onlyNew, onClick = onToggleNew)
             }
+            Spacer(Modifier.weight(1f))
+            // 「热门」不是玄学：说清它按点赞数排，用户才知道和「最新」的区别。
+            state.sort?.let { current ->
+                if (current == CloudSort.POPULAR) {
+                    Text(
+                        "按点赞数",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
 
         if (state.error != null) {
@@ -416,9 +427,12 @@ private fun CloudRecipeCard(recipe: CloudRecipe, onClick: () -> Unit) {
                 modifier = Modifier.weight(1f),
             )
         }
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
-            Text(
-                recipe.pictureControlName.ifBlank { "—" },
+        val showsCode = recipe.pictureControlName.isNotBlank() &&
+            !recipe.pictureControlName.equals(recipe.name, ignoreCase = true)
+        // 主名与英文代号相同时只留一行：重复文本等于白占一行（UI 审查 2 · P2）。
+        if (showsCode || recipe.likes > 0) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
+            if (showsCode) Text(
+                recipe.pictureControlName,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
