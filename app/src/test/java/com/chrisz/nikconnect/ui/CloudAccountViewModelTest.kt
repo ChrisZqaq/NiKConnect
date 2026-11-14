@@ -42,6 +42,7 @@ class CloudAccountViewModelTest {
 
     private class FakeApi(
         var expireFirstIdentityCall: Boolean = false,
+        var expireFirstSlotCall: Boolean = false,
         var refreshResult: Pair<String, String?>? = null,
         var cameras: List<CloudCamera> = listOf(CloudCamera(id = "CAM1", name = "Zf", model = "Zf")),
     ) : CloudAccountApi {
@@ -49,6 +50,7 @@ class CloudAccountViewModelTest {
         var refreshCalls = 0
         var lastRefreshToken: String? = null
         var lastCameraToken: String? = null
+        var slotCalls = 0
 
         override suspend fun fetchIdentity(): CloudIdentity {
             identityCalls++
@@ -63,8 +65,14 @@ class CloudAccountViewModelTest {
             return cameras
         }
 
-        override suspend fun cameraSlots(cameraId: String, recipeIds: List<String?>?): List<CloudSlot> =
-            emptyList()
+        override suspend fun cameraSlots(cameraId: String, recipeIds: List<String?>?): List<CloudSlot> {
+            slotCalls++
+            lastCameraToken = currentToken
+            if (expireFirstSlotCall && slotCalls == 1) {
+                throw CloudException("IF_IR_R_C002 HTTP 401：", httpStatus = 401)
+            }
+            return listOf(CloudSlot(index = 1, recipeId = "R1", name = "Kept"))
+        }
 
         override suspend fun fetchAssignable(): CloudAssignable = CloudAssignable(emptyList())
 
@@ -150,5 +158,27 @@ class CloudAccountViewModelTest {
 
         assertEquals(0, api.refreshCalls)
         assertTrue(model.state.value.sessionExpired)
+    }
+
+    @Test
+    fun `expired token on slot read is refreshed once and retried`() = runTest(dispatcher) {
+        // 真机现象：access_token 只有 5 分钟，槽位页停留一会儿 C002 就 401；
+        // 旧实现只有"读账号信息"会续期，槽位/收藏/写入全部直接报错。
+        val api = FakeApi(
+            expireFirstSlotCall = true,
+            refreshResult = "new-token" to "new-refresh",
+        )
+        val model = model(api, refreshToken = "rt-1")
+        advanceUntilIdle()
+        assertEquals(0, api.refreshCalls)   // 读账号信息这一步没 401，不该无谓刷新
+
+        model.openCamera(CloudCamera(id = "CAM1", name = "Zf", model = "Zf"))
+        advanceUntilIdle()
+
+        assertEquals(1, api.refreshCalls)
+        assertEquals(2, api.slotCalls)
+        assertNull(model.state.value.slotsError)
+        assertEquals("Kept", model.state.value.slots.firstOrNull { it.index == 1 }?.name)
+        assertEquals("new-token", api.lastCameraToken)
     }
 }

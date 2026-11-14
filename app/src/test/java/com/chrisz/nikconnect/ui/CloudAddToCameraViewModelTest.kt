@@ -46,6 +46,7 @@ class CloudAddToCameraViewModelTest {
         val calls = mutableListOf<String>()
         var addedRecipes: List<String> = emptyList()
         var patched: List<CloudSlotAssignment> = emptyList()
+        val deleted = mutableListOf<String>()
 
         override suspend fun fetchIdentity(): CloudIdentity {
             calls += "identity"
@@ -97,12 +98,17 @@ class CloudAddToCameraViewModelTest {
             return "200"
         }
 
-        override suspend fun deleteSlot(cameraId: String, recipeId: String): String = "200"
+        override suspend fun deleteSlot(cameraId: String, recipeId: String): String {
+            calls += "c005"
+            deleted += recipeId
+            layout = layout.map { if (it == recipeId) null else it }
+            return "200"
+        }
 
         override suspend fun addRecipes(cameraId: String, recipeIds: List<String>): String {
             calls += "c003"
             addedRecipes = recipeIds
-            layout = layout.toMutableList().also { it[0] = recipeIds.first() }
+            // 真机上 C003 只是把方案加进"可分配池"，槽位排布不会自己变，这里保持 layout 不动。
             return "201"
         }
 
@@ -183,5 +189,30 @@ class CloudAddToCameraViewModelTest {
         val recipes = listOf(OwnedRecipe("L1", "Mate Film by Choi matae"))
         assertEquals("L1", collectedIdOf(recipes, "mate film by choi matae"))
         assertNull(collectedIdOf(recipes, "missing"))
+    }
+
+    @Test
+    fun addToSlot_deletesTheOccupantBeforePatching() = runTest(dispatcher) {
+        // 真机 2026-11-14：直接把已占用的槽位换成另一个方案，PATCH 会 400 ——
+        // 服务端把这种改动当成"移除旧方案"，必须先用 C005 删掉它。
+        val api = FakeApi()
+        val model = CloudAddToCameraViewModel(
+            token = "t",
+            capturedGuid = "0000000000062160",
+            clientFactory = { _, _ -> api },
+        )
+
+        model.addToSlot(
+            camera = CloudCamera(id = "CAM1", name = "Zf", model = "", serial = ""),
+            position = 1,
+            recipeId = "PUB-2",
+            recipeName = "Blue Hour by Luna",
+            alreadyCollectedId = "LOCAL-9",
+        )
+        advanceUntilIdle()
+
+        assertEquals(listOf("KEEP-2"), api.deleted)
+        assertEquals(listOf(CloudSlotAssignment(2, "LOCAL-9")), api.patched)
+        assertNull(model.state.value.error)
     }
 }

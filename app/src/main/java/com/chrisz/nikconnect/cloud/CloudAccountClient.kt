@@ -677,7 +677,7 @@ internal class CloudAccountClient(
  */
 internal data class CloudSlotWritePlan(
     val noop: Boolean = false,
-    /** 需要逐条删除的方案（只在"全部清空"时使用）。 */
+    /** 需要逐条删除的方案：全清空时是全部，替换某个已占槽位时是被替换掉的那个。 */
     val deletes: List<String> = emptyList(),
     /** 需要 PATCH 的排布；null 表示不发 PATCH。 */
     val assignments: List<CloudSlotAssignment>? = null,
@@ -710,7 +710,16 @@ internal fun planSlotWrite(before: List<CloudSlot>, after: List<CloudSlot>): Clo
     val afterKey = after.assignedSlots()
     if (beforeKey == afterKey) return CloudSlotWritePlan(noop = true)
     if (afterKey.isEmpty()) return CloudSlotWritePlan(deletes = beforeKey.map { it.second }.distinct())
+
+    // 把一个已占用的位置换成另一个方案，不能只靠 PATCH：PATCH 只是"排布覆盖"，
+    // 服务端仍然认为被换掉的方案属于这台相机，实测直接 400（真机 2026-11-14）。
+    // 必须先 C005 删掉旧方案，再 PATCH 新排布。
+    val replaced = beforeKey
+        .filter { (slotNo, recipeId) -> afterKey.any { it.first == slotNo && it.second != recipeId } }
+        .map { it.second }
+
     return CloudSlotWritePlan(
+        deletes = replaced.distinct(),
         assignments = afterKey.map { (slotNo, recipeId) -> CloudSlotAssignment(slotNo, recipeId) },
     )
 }

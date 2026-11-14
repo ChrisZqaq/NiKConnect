@@ -8,6 +8,8 @@ import com.chrisz.nikconnect.cloud.CloudCamera
 import com.chrisz.nikconnect.cloud.CloudException
 import com.chrisz.nikconnect.cloud.CloudSlot
 import com.chrisz.nikconnect.cloud.CloudSlotAssignment
+import com.chrisz.nikconnect.cloud.mergeSlots
+import com.chrisz.nikconnect.cloud.planSlotWrite
 import com.chrisz.nikconnect.cloud.OwnedRecipe
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -114,7 +116,32 @@ internal class CloudAddToCameraViewModel(
                     api.addRecipes(camera.id, listOf(localId))
                     _state.update { it.copy(working = "正在写入槽位…") }
                     val layout = api.fetchAssignable().layouts[camera.id]
-                    val assignments = buildAssignments(layout, position, localId)
+                    var beforeSlots = mergeSlots(layout, emptyList())
+                    val target = position + 1
+
+                    // 已经在目标位：C003 可能已把它放进去了，不必再 PATCH。
+                    if (beforeSlots.firstOrNull { it.index == target }?.recipeId == localId) {
+                        return@withSession recipeName
+                    }
+
+                    // 目标位被别的方案占着：先 C005 删掉它，只 PATCH 会 400（真机实证）。
+                    beforeSlots.firstOrNull { it.index == target }
+                        ?.recipeId
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { api.deleteSlot(camera.id, it) }
+
+                    // 同一方案若已在别的槽位，先移出再重新加回，避免 PATCH 里出现两次同一个 id。
+                    if (beforeSlots.any { it.index != target && it.recipeId == localId }) {
+                        api.deleteSlot(camera.id, localId)
+                        api.addRecipes(camera.id, listOf(localId))
+                        beforeSlots = mergeSlots(api.fetchAssignable().layouts[camera.id], emptyList())
+                    }
+
+                    val assignments = buildAssignments(
+                        layout = beforeSlots.map { if (it.occupied) it.recipeId else null },
+                        position = position,
+                        localId = localId,
+                    )
                     api.replaceSlots(camera.id, assignments)
                     recipeName
                 }

@@ -248,6 +248,21 @@ internal class CloudAccountViewModel(
         return true
     }
 
+    /**
+     * 带续期的调用：401/403 时先用 refresh_token 换新 token，再重试一次。
+     *
+     * access_token 只有 5 分钟（`expires_in=300`），槽位页停留一会儿就会 401。
+     * 之前只有"读账号信息"这一条路会续期，C002/C005/C004/H05 全都直接失败。
+     */
+    private suspend fun <T> withSession(block: suspend (CloudAccountApi) -> T): T {
+        fun client() = clientFactory(accessToken, workingGuid ?: _state.value.guid.orEmpty())
+        return try {
+            block(client())
+        } catch (e: CloudException) {
+            if (e.httpStatus in setOf(401, 403) && tryRefreshToken()) block(client()) else throw e
+        }
+    }
+
     /** 重新登录后调用：token 变了就丢掉旧数据重新拉，旧响应因代次变化自动失效。 */
     fun updateCredentials(token: String?, guid: String?, refreshToken: String? = null) {
         val next = token?.trim().orEmpty()
@@ -273,7 +288,7 @@ internal class CloudAccountViewModel(
         _state.update { it.copy(loadingLibrary = true, libraryError = null) }
         viewModelScope.launch {
             try {
-                val library = client.fetchMyRecipes()
+                val library = withSession { it.fetchMyRecipes() }
                 _state.update { it.copy(library = library, loadingLibrary = false) }
             } catch (e: CloudException) {
                 _state.update {
@@ -296,7 +311,7 @@ internal class CloudAccountViewModel(
         viewModelScope.launch {
             val client = clientFactory(accessToken, guid)
             try {
-                val assignable = client.fetchAssignable()
+                val assignable = withSession { it.fetchAssignable() }
                 _state.update {
                     it.copy(
                         assignable = assignable.recipes,
@@ -337,7 +352,7 @@ internal class CloudAccountViewModel(
             try {
                 val client = clientFactory(accessToken, _state.value.guid.orEmpty())
                 client.addRecipes(camera.id, listOf(recipe.id))
-                val assignable = runCatching { client.fetchAssignable() }.getOrNull()
+                val assignable = runCatching { withSession { it.fetchAssignable() } }.getOrNull()
                 val slots = padSlots(
                     client.cameraSlots(camera.id, assignable?.layouts?.get(camera.id)),
                 )
@@ -428,7 +443,7 @@ internal class CloudAccountViewModel(
         viewModelScope.launch {
             val client = clientFactory(accessToken, guid)
             try {
-                client.deleteSlot(camera.id, recipeId)
+                withSession { it.deleteSlot(camera.id, recipeId) }
                 val refreshed = fetchSlots(client, camera.id)
                 if (requestId != slotRequestId || _state.value.selected?.id != camera.id) return@launch
                 _state.update {
@@ -475,12 +490,11 @@ internal class CloudAccountViewModel(
         viewModelScope.launch {
             val client = clientFactory(accessToken, guid)
             try {
-                // 全清空（after 为空）只能用逐条 DELETE：C004 的空数组不在契约里，服务端回 422。
-                val assignments = plan.assignments
-                if (assignments == null) {
-                    plan.deletes.forEach { client.deleteSlot(camera.id, it) }
-                } else {
-                    client.replaceSlots(camera.id, assignments)
+                // 删除永远逐条走 C005：C004 的空数组不在契约里（服务端 422），
+                // 而"替换已占用的位置"也必须先删旧的再 PATCH（真机 400 实证）。
+                plan.deletes.forEach { id -> withSession { it.deleteSlot(camera.id, id) } }
+                plan.assignments?.let { assignments ->
+                    withSession { it.replaceSlots(camera.id, assignments) }
                 }
                 val refreshed = fetchSlots(client, camera.id)
                 _state.update {
@@ -536,7 +550,7 @@ internal class CloudAccountViewModel(
                 )
             }
         }
-        return client.cameraSlots(cameraId, assignable?.layouts?.get(cameraId))
+        return withSession { it.cameraSlots(cameraId, assignable?.layouts?.get(cameraId)) }
     }
 
     fun backToList() {
