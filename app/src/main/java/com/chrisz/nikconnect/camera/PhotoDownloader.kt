@@ -53,8 +53,13 @@ internal class PhotoDownloader(
         }
     }
 
-    /** 按 RAW/JPEG 选 MIME 发布到系统相册；文件名保留相机原始扩展名。 */
-    private fun publishImage(part: File, photo: PhotoObject): Uri {
+    /**
+     * 按 RAW/JPEG 选 MIME 发布到系统相册；文件名保留相机原始扩展名。
+     *
+     * 复制前与每 256 KiB 之间都检查取消：发布阶段被取消时要删掉半成品 MediaStore 项目，
+     * 否则相册里会留下一个 0 字节或截断的条目（评审 F09）。NRW 用独立 MIME，不能一律标成 NEF。
+     */
+    private suspend fun publishImage(part: File, photo: PhotoObject): Uri {
         val resolver = context.contentResolver
         // 同名同大小已存在 → 视为已下载，直接收下：否则 MediaStore 会另存成「名字 (1).JPG」，
         // 同样的照片在相册里出现两份（真机踩过）。同名不同大小则视为**另一张照片**，并存不删。
@@ -63,9 +68,14 @@ internal class PhotoDownloader(
             return existing
         }
         val isRaw = photo.isRaw && !photo.isJpeg
+        val mime = when {
+            photo.filename.endsWith(".nrw", ignoreCase = true) -> "image/x-nikon-nrw"
+            isRaw -> "image/x-nikon-nef"
+            else -> "image/jpeg"
+        }
         val values = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, photo.filename)
-            put(MediaStore.Images.Media.MIME_TYPE, if (isRaw) "image/x-nikon-nef" else "image/jpeg")
+            put(MediaStore.Images.Media.MIME_TYPE, mime)
             put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/NiKConnect")
             put(MediaStore.Images.Media.IS_PENDING, 1)
         }
@@ -73,7 +83,15 @@ internal class PhotoDownloader(
         val uri = resolver.insert(collection, values) ?: throw IOException("无法创建系统相册项目")
         try {
             resolver.openOutputStream(uri, "w")?.use { output ->
-                part.inputStream().use { input -> input.copyTo(output, 256 * 1024) }
+                part.inputStream().use { input ->
+                    val buffer = ByteArray(256 * 1024)
+                    while (true) {
+                        currentCoroutineContext().ensureActive()
+                        val read = input.read(buffer)
+                        if (read <= 0) break
+                        output.write(buffer, 0, read)
+                    }
+                }
             } ?: throw IOException("无法写入系统相册")
             val published = resolver.update(
                 uri,

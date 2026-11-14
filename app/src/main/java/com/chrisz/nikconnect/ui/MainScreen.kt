@@ -427,11 +427,13 @@ private fun GalleryScreen(
                             // 一次全选 60 张就是 0.9 GB 级别的流量（真机踩过），超过阈值先确认。
                             val chosen = filteredPhotos.filter { it.handle in selected.value }
                             var confirmBulk by remember { mutableStateOf(false) }
+                            // 数量必须与实际要下的集合一致：切换筛选后 selected 里可能残留隐藏项
+                            // （评审 F15，早期按钮显示 3 实际只下 1 张）。
                             Button(
                                 onClick = { confirmBulk = true },
-                                enabled = selected.value.isNotEmpty(),
+                                enabled = chosen.isNotEmpty(),
                             ) {
-                                Text("下载所选 (${selected.value.size})")
+                                Text("下载所选 (${chosen.size})")
                             }
                             if (confirmBulk) {
                                 val total = chosen.sumOf { it.size }

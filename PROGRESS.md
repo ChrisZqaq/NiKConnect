@@ -299,6 +299,13 @@
 
 验证：149 项 JVM 测试 0 失败（`PtpIpClientLoopbackTest` 改为 `PhotoPage` 字段断言，并显式传 `snapshot`），lint 0 error / 6 warning；`0.10.2-alpha` / versionCode 53。
 
+## 2026-11-14 · 0.10.3：Astra 评审 E 批 + F09 发布阶段
+
+- **F09 发布阶段可取消 + NRW 用独立 MIME**：`camera/PhotoDownloader.kt` 的 `publishImage` 改为 `suspend`，每写 256 KiB 前 `currentCoroutineContext().ensureActive()`；被取消时走既有 `catch` 分支 `resolver.delete(uri)` 清掉半成品 MediaStore 项目（不会再留下 0 字节条目）。MIME 由 `photo.filename.endsWith(".nrw")` 判为 `image/x-nikon-nrw`，其余 RAW 仍 `image/x-nikon-nef`。
+- **F15 选择数量与实际集合一致**：`ui/MainScreen.kt` 底部「下载所选 (N)」的 N 与 `enabled` 从 `selected.value` 改为 `chosen`（＝当前筛选可见且被勾选的集合）。切换 JPEG/RAW 筛选后不再出现"显示 3 实际只下 1 张"。
+
+验证：149 项 JVM 测试 0 失败、lint 0 error / 6 warning；`0.10.3-alpha` / versionCode 54。
+
 ## 版本历史
 
 | 版本 | 内容 | 真机 | 验收记录 |
