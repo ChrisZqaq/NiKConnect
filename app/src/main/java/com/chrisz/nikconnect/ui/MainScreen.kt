@@ -231,18 +231,17 @@ private fun ConnectionScreen(state: UiState, onConnect: () -> Unit) {
     ) {
         Spacer(Modifier.height(8.dp))
         Text("连接相机", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        // 步骤不再套一层卡片：卡片只该容器能点的东西，纯说明用间距和分隔线就够（UI 审查 2 · P2）。
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            ConnectionStep("1", "相机开启 Wi-Fi", "网络菜单 → 连接至智能设备 → Wi-Fi 连接")
+            HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+            ConnectionStep("2", "手机连接相机 Wi-Fi", "无互联网时选择“保持连接”")
+        }
         Text(
             "PTP/IP 直连，照片不经过任何服务器。",
-            style = MaterialTheme.typography.bodySmall,
+            style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                ConnectionStep("1", "相机开启 Wi-Fi", "网络菜单 → 连接至智能设备 → Wi-Fi 连接")
-                HorizontalDivider(color = MaterialTheme.colorScheme.surface)
-                ConnectionStep("2", "手机连接相机 Wi-Fi", "无互联网时选择“保持连接”")
-            }
-        }
         // 相机侧行为（真机实测）：一断联相机就自己关掉热点，App 无法重新打开它。
         // 与其让用户反复点「重试」，不如在首次连接前就说清这一步在机身上做。
         Text(
@@ -269,7 +268,14 @@ private fun ConnectionScreen(state: UiState, onConnect: () -> Unit) {
                 Icon(Icons.Default.Wifi, contentDescription = null)
                 Spacer(Modifier.size(8.dp))
             }
-            Text(if (connecting) "连接中…" else "连接")
+            // 失败后同一个按钮直接承担「再试一次」，不再在错误卡里重复一个重试入口。
+            Text(
+                when {
+                    connecting -> "连接中…"
+                    state.error != null -> "重新连接"
+                    else -> "连接"
+                },
+            )
         }
     }
 }
