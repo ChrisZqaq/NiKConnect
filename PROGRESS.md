@@ -88,6 +88,16 @@
 
 `docs/acceptance/0.4.md` 已填表并改写结论；PRD 的 D-09 行同步为真机通过。
 
+## 2026-11-14 · 0.9.3：连接页去掉「重连 192.168.1.1」和「相机 IP（可选）」
+
+用户口径：不要给用户暴露 IP、也不要摆一个"重连上次地址"的按钮，只留"相机怎么开、手机怎么连"的指引 + 一个连接按钮。
+
+改动（`app/src/main/java/com/chrisz/nikconnect/ui/MainScreen.kt`）：
+- 删掉 `if (state.lastHost != null)` 的「重新连接 …」`OutlinedButton`；
+- 删掉「相机 IP（可选）」`OutlinedTextField` 与 `manualHost` 状态；
+- `ConnectionScreen(state, onConnect: () -> Unit)`，`onConnect` 一律走自动发现（`model.connect("")`，候选仍是网关 → `192.168.1.1`）；
+- 失败卡片只保留「Wi-Fi 设置 / 重试 / 诊断详情」。
+
 ## 2026-11-14 · 断联语义定稿（无代码改动）
 
 产品口径（用户拍板）：

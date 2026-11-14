@@ -57,7 +57,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -98,7 +97,7 @@ internal fun NiKConnectApp(model: MainViewModel) {
     val state by model.state.collectAsStateWithLifecycle()
     NiKConnectContent(
         state = state,
-        onConnect = model::connect,
+        onConnect = { model.connect("") },
         onRefresh = model::refreshPhotos,
         onDownload = model::download,
         onDownloadAll = model::downloadAll,
@@ -118,7 +117,7 @@ internal fun NiKConnectApp(model: MainViewModel) {
 @Composable
 private fun NiKConnectContent(
     state: UiState,
-    onConnect: (String) -> Unit,
+    onConnect: () -> Unit,
     onRefresh: () -> Unit,
     onDownload: (PhotoObject) -> Unit,
     onDownloadAll: (List<PhotoObject>) -> Unit,
@@ -193,8 +192,7 @@ private fun NiKConnectContent(
 }
 
 @Composable
-private fun ConnectionScreen(state: UiState, onConnect: (String) -> Unit) {
-    var manualHost by rememberSaveable { mutableStateOf("") }
+private fun ConnectionScreen(state: UiState, onConnect: () -> Unit) {
     val connecting = state.connectionStatus == ConnectionStatus.CONNECTING
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
@@ -207,17 +205,6 @@ private fun ConnectionScreen(state: UiState, onConnect: (String) -> Unit) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        if (state.lastHost != null) {
-            OutlinedButton(
-                onClick = { onConnect(state.lastHost) },
-                enabled = !connecting,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-            ) {
-                Icon(Icons.Default.Refresh, contentDescription = null)
-                Spacer(Modifier.size(8.dp))
-                Text(if (connecting) "重连中…" else "重新连接 ${state.lastHost}")
-            }
-        }
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 ConnectionStep("1", "相机开启 Wi-Fi", "网络菜单 → 连接至智能设备 → Wi-Fi 连接")
@@ -229,19 +216,11 @@ private fun ConnectionScreen(state: UiState, onConnect: (String) -> Unit) {
             ConnectionErrorCard(
                 message = message,
                 canRetry = !connecting,
-                onRetry = { onConnect(state.lastHost ?: "") },
+                onRetry = onConnect,
             )
         }
-        OutlinedTextField(
-            value = manualHost,
-            onValueChange = { manualHost = it },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = !connecting,
-            singleLine = true,
-            label = { Text("相机 IP（可选）") },
-        )
         Button(
-            onClick = { onConnect(manualHost) },
+            onClick = onConnect,
             enabled = !connecting,
             modifier = Modifier.fillMaxWidth().height(56.dp),
         ) {
