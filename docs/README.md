@@ -10,7 +10,7 @@
 
 - 仓库根 `CLAUDE.md`：代码风格与工程规范（`AGENTS.md` 为其符号链接）。
 - 仓库根 `PROGRESS.md`：进展与问题记录（持续更新）。
-- [acceptance/](acceptance/)：验收记录，每版本一份，模板见 [acceptance/TEMPLATE.md](acceptance/TEMPLATE.md)。最新：[acceptance/0.6.md](acceptance/0.6.md)（云创账号与槽位写入，2026-11-13/14 真机通过）；[acceptance/0.8.md](acceptance/0.8.md)（UI 清理，**待真机**）；另见 [acceptance/0.5.md](acceptance/0.5.md)（云创原生浏览，含四项遗留）。
+- [acceptance/](acceptance/)：验收记录，每版本一份，模板见 [acceptance/TEMPLATE.md](acceptance/TEMPLATE.md)。最新：[acceptance/0.6.md](acceptance/0.6.md)（云创账号与槽位写入，2026-11-13/14 真机通过）；[acceptance/0.8.md](acceptance/0.8.md)（UI 清理，**待真机**）；另见 [acceptance/0.5.md](acceptance/0.5.md)（云创原生浏览，含四项遗留）；评审整改矩阵见 [acceptance/0.10.md](acceptance/0.10.md)。
 
 ## 技术与证据
 
