@@ -199,27 +199,60 @@ internal fun CloudAccountScreen(
     }
 }
 
-/** 账号 ID 明文一行：出问题时用户能直接读出来反馈，不用去装抓包工具。 */
+/**
+ * 账号信息折叠行：默认只显示掩码（后 6 位），展开后可选中复制完整 ID。
+ * 出问题时用户能直接读出来反馈，不用去装抓包工具；平时不占视觉。 */
 @Composable
 private fun GuidLine(guid: String) {
-    Row(
+    var expanded by remember { mutableStateOf(false) }
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp, vertical = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            "账号 ID",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.width(8.dp))
-        SelectionContainer {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .clickable { expanded = !expanded }
+                .padding(vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
-                guid,
+                "账号信息",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                if (expanded) "" else "…" + guid.takeLast(6),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        if (expanded) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "账号 ID",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.width(8.dp))
+                SelectionContainer {
+                    Text(
+                        guid,
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
     }
 }
@@ -343,8 +376,16 @@ private fun LibrarySection(state: CloudAccountState) {
     val library = state.library
     if (library == null && !state.loadingLibrary && state.libraryError == null) return
 
+    var expanded by remember { mutableStateOf(false) }
     Spacer(Modifier.height(14.dp))
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .clickable { expanded = !expanded }
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Text(
             "我的收藏",
             style = MaterialTheme.typography.titleSmall,
@@ -359,6 +400,13 @@ private fun LibrarySection(state: CloudAccountState) {
             },
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        Icon(
+            if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+            contentDescription = if (expanded) "收起我的收藏" else "展开我的收藏",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp),
         )
     }
 
@@ -370,7 +418,7 @@ private fun LibrarySection(state: CloudAccountState) {
         )
     }
 
-    if (library != null) {
+    if (library != null && expanded) {
         val known = library.books.map { it.id }.toSet()
         val groups = library.books.map { book ->
             book.label.ifBlank { "未命名收藏夹" } to library.recipes.filter { it.bookId == book.id }
@@ -447,13 +495,13 @@ private fun SlotSection(
             )
             if (editing) {
                 TextButton(onClick = onCancelEdit, enabled = !state.saving, modifier = Modifier.heightIn(min = 48.dp)) {
-                    Text("撤销")
+                    Text("取消")
                 }
                 Button(onClick = onSave, enabled = !state.saving, modifier = Modifier.heightIn(min = 48.dp)) {
                     if (state.saving) {
                         CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                     } else {
-                        Text("保存到相机")
+                        Text("保存排布")
                     }
                 }
             } else {
@@ -478,13 +526,10 @@ private fun SlotSection(
         }
 
         state.saveError?.let { Notice(it) }
-        state.rawSnippet?.let { RawSnippet(it) }
-
-        LibrarySection(state)
 
         if (editing) {
             Text(
-                "↑↓ 一格格挪位，也可长按整行拖动 · 点空槽位的「＋」从可分配池挑方案 · 保存后相机联网时会重新拉取。删除在非编辑态用行尾垃圾桶（立即生效）",
+                "点「＋」加方案 · ↑↓ 或长按拖动换位 · 保存后相机联网才生效。删除在非编辑态用行尾垃圾桶。",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -622,33 +667,59 @@ private fun SlotSection(
             }
         }
 
+        Spacer(Modifier.height(6.dp))
+        LibrarySection(state)
+
+        state.rawSnippet?.let { RawSnippet(it) }
+
         Text(
-            "说明：云创方案占相机内的 9 个云创槽位（独立存储区），不是机身菜单的 C-1…C-9。编辑态下长按拖动换位、点击清空；有方案时保存＝整体覆盖排布，全部清空后保存＝逐个删除方案（`DELETE`）。提交到账号后，相机联网时会自己拉取；App 不代理方案文件。",
+            "云创方案占相机里的 9 个独立槽位，不是机身菜单的 C-1…C-9。保存只是把排布提交到账号，相机联网后才会自己拉取。",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
 
-/** 解析失败时把原始响应摊开，便于用户截图反馈（不含 token）。 */
+/**
+ * 诊断折叠区：默认收起，避免接口码与原始 JSON 打断正文阅读。
+ * 内容不含 token（请求头未落盘），可以放心截图。 */
 @Composable
 private fun RawSnippet(text: String) {
+    var expanded by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(
-            "接口原始响应（可截图反馈）",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            text,
-            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surface)
-                .padding(10.dp),
-        )
+                .clickable { expanded = !expanded }
+                .padding(vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                if (expanded) "收起诊断信息" else "诊断信息",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        if (expanded) {
+            Text(
+                text,
+                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(10.dp),
+            )
+        }
     }
 }
 

@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -26,12 +27,15 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PhotoLibrary
@@ -69,11 +73,15 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -172,7 +180,7 @@ private fun NiKConnectContent(
                     cloudRefreshToken = state.cloudRefreshToken,
                 )
                 // 传输页与连接状态解耦：断线后仍可查看结果、失败原因与重试入口
-                state.selectedTab == 1 -> TransferScreen(state, onRetryDownload, onCancelDownload)
+                state.selectedTab == 1 -> TransferScreen(state, onRetryDownload, onCancelDownload, onGoPhotos = { onTab(0) })
                 connected -> GalleryScreen(state, onDownload, onDownloadAll, onLoadMore, onViewTier, thumbnailLoader)
                 else -> ConnectionScreen(state, onConnect)
             }
@@ -188,29 +196,13 @@ private fun ConnectionScreen(state: UiState, onConnect: (String) -> Unit) {
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
-        Spacer(Modifier.height(16.dp))
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Surface(
-                shape = MaterialTheme.shapes.small,
-                color = MaterialTheme.colorScheme.primary,
-            ) {
-                Text(
-                    "NP",
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    color = MaterialTheme.colorScheme.onPrimary,
-                    fontWeight = FontWeight.Black,
-                )
-            }
-            Column {
-                Text("NIKCONNECT", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black)
-                Text(
-                    "PTP/IP 直连传图",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
+        Spacer(Modifier.height(8.dp))
         Text("连接相机", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Text(
+            "PTP/IP 直连，照片不经过任何服务器。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         if (state.lastHost != null) {
             OutlinedButton(
                 onClick = { onConnect(state.lastHost) },
@@ -229,7 +221,13 @@ private fun ConnectionScreen(state: UiState, onConnect: (String) -> Unit) {
                 ConnectionStep("2", "手机连接相机 Wi-Fi", "无互联网时选择“保持连接”")
             }
         }
-        if (state.error != null) ErrorCard(state.error)
+        state.error?.let { message ->
+            ConnectionErrorCard(
+                message = message,
+                canRetry = state.lastHost != null && !connecting,
+                onRetry = { onConnect(state.lastHost ?: "") },
+            )
+        }
         OutlinedTextField(
             value = manualHost,
             onValueChange = { manualHost = it },
@@ -636,6 +634,7 @@ private fun TransferScreen(
     state: UiState,
     onRetry: (Long) -> Unit,
     onCancel: (Long) -> Unit,
+    onGoPhotos: () -> Unit,
 ) {
     if (state.downloads.isNotEmpty()) {
         val done = state.downloads.count { it.status == DownloadStatus.COMPLETED }
@@ -651,8 +650,21 @@ private fun TransferScreen(
         }
     }
     if (state.downloads.isEmpty()) {
-        Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
-            Text("暂无传输", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(
+            modifier = Modifier.fillMaxSize().padding(32.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text("传输", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "这里会显示每张照片的下载进度、失败原因和重试入口。先到「照片」页选中要传的照片。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(18.dp))
+            Button(onClick = onGoPhotos, modifier = Modifier.heightIn(min = 48.dp)) { Text("去选择照片") }
         }
         return
     }
@@ -730,6 +742,76 @@ private fun TransferScreen(
     }
 }
 
+
+/**
+ * 连接失败：先说人话和下一步，技术异常收进「诊断详情」。
+ * 之前直接把 ECONNREFUSED / IP / 端口铺在红色卡里，用户无法判断该查相机还是查手机网络。
+ */
+@Composable
+private fun ConnectionErrorCard(
+    message: String,
+    canRetry: Boolean,
+    onRetry: () -> Unit,
+) {
+    val context = LocalContext.current
+    var showDiagnostics by remember { mutableStateOf(false) }
+    val looksLikeNetwork = message.contains("refused", ignoreCase = true) ||
+        message.contains("timeout", ignoreCase = true) ||
+        message.contains("timed out", ignoreCase = true) ||
+        message.contains("unreachable", ignoreCase = true) ||
+        message.contains("failed to connect", ignoreCase = true)
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                if (looksLikeNetwork) "没找到相机" else "连接没有成功",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                "确认手机当前连的是相机的 Wi-Fi（不是家里的路由器），相机处于「连接至智能设备 → Wi-Fi 连接」状态，然后再试一次。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(
+                    onClick = {
+                        val intent = android.content.Intent(android.provider.Settings.ACTION_WIFI_SETTINGS)
+                        runCatching { context.startActivity(intent) }
+                    },
+                    modifier = Modifier.weight(1f).height(48.dp),
+                ) { Text("打开 Wi-Fi 设置") }
+                Button(
+                    onClick = onRetry,
+                    enabled = canRetry,
+                    modifier = Modifier.weight(1f).height(48.dp),
+                ) { Text("重试") }
+            }
+            TextButton(
+                onClick = { showDiagnostics = !showDiagnostics },
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) {
+                Text(if (showDiagnostics) "收起诊断详情" else "诊断详情")
+                Icon(
+                    if (showDiagnostics) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            if (showDiagnostics) {
+                Text(
+                    message,
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(10.dp),
+                )
+            }
+        }
+    }
+}
 
 @Composable
 private fun ErrorCard(message: String, modifier: Modifier = Modifier) {

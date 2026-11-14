@@ -124,6 +124,17 @@ internal fun CloudFavoriteBar(
         )
     }
 
+    CloudAddToCameraBar(
+        recipeId = recipeId,
+        recipeName = recipeName,
+        token = token,
+        guid = guid,
+        collectedLocalId = collected?.id,
+        onNeedLogin = onNeedLogin,
+        refreshToken = refreshToken,
+        onTokenRefreshed = onTokenRefreshed,
+    )
+
     if (confirmRemove && collected != null) {
         AlertDialog(
             onDismissRequest = { confirmRemove = false },

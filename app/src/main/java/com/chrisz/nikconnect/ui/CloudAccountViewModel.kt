@@ -436,7 +436,7 @@ internal class CloudAccountViewModel(
                         slots = refreshed,
                         draft = null,
                         deleting = null,
-                        savedNotice = "已删除该槽位方案",
+                        savedNotice = "已删除该槽位方案 · 相机联网后生效",
                     )
                 }
             } catch (e: CloudException) {
@@ -489,9 +489,9 @@ internal class CloudAccountViewModel(
                         draft = null,
                         saving = false,
                         savedNotice = if (plan.assignments == null) {
-                            "已删除 ${plan.deletes.size} 个槽位方案"
+                            "已删除 ${plan.deletes.size} 个槽位方案 · 相机联网后生效"
                         } else {
-                            "已提交 ${plan.assignments.size} 个槽位"
+                            "已保存 ${plan.assignments.size} 个槽位的排布 · 相机联网后生效"
                         },
                     )
                 }
