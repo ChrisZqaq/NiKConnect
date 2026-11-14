@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""NP3 生成器：把尼康云创官方参数表（/bff/recipe/release/detail 或 publicrecipe）转换为 NP3 文件字节。
+"""NP3 生成/对照脚本。
+
+用法：`python3 tools/np3/np3_generate.py --samples <NP3目录>`
+
+注意（2026-11-14）：仓库不再内置第三方 .NP3 样本与官方方案详情快照（避免再分发他人作品）。
+要复现对照结论，请自备样本：把相机导出的 .NP3 放进任意目录，用 --samples 指向它。
+
+NP3 生成器：把尼康云创官方参数表（/bff/recipe/release/detail 或 publicrecipe）转换为 NP3 文件字节。
 
 字段映射（对 baseName = FLEXIBLE COLOR，32/32 样本验证）：
   tag 0x06 sharpening        每 0.25 一步：hi = 4*v + 0x80, lo = 0x04

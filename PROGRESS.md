@@ -88,6 +88,24 @@
 
 `docs/acceptance/0.4.md` 已填表并改写结论；PRD 的 D-09 行同步为真机通过。
 
+## 2026-11-14 · 0.8.7：仓库版权清理（去第三方 NP3 与官方详情快照）
+
+按方案 A 执行，公开仓库不再包含他人作品：
+
+| 移除 | 数量 | 说明 |
+|---|---|---|
+| `app/src/test/resources/np3/*.NP3` | 32 | Timor88/NikonNP3 的真实相机导出样本 |
+| `docs/data/recipes/generated/*.NP3` | 10 | 我们用官方参数生成的，仍属衍生内容 |
+| `docs/data/recipes/details/*.json` | 144 | 官方方案说明正文 + 拍摄参数快照 |
+
+替代与配套：
+
+- `Np3FileTest` 改为**按格式规范现场拼字节**（`header + 20B name + TLV + tail`），覆盖 392/978 两种尾部（含 BI0 曲线块）、有符号参数、magic 校验，共 5 项；不再依赖任何真实样本。
+- `.gitignore` 增加 `*.NP3` / `*.np3`，防止以后误提交。
+- `README.md` 新增「素材与版权」四条：App 不内置 NP3/封面/说明、仓库不收录第三方样本、不放官方详情快照、与尼康无隶属关系。
+- `docs/README.md` 去掉 details/generated 索引；`docs/references/TECHNICAL_REFERENCES.md` §9 行改写；`docs/research/np3-generation-report.md` 顶部加"样本已移除、复现需自备"；`tools/np3/np3_generate.py` 注明 `--samples`。
+- APK 资产核查：仍只有 `assets/cloud/catalog_seed.json`（144 条 id/name/代号，无封面无正文）。
+
 ## 2026-11-14 · 0.8.6：清理 0.5 遗留三项
 
 | 遗留 | 处理 |

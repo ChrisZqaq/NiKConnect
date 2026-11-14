@@ -30,3 +30,10 @@ Android 优先的 Nikon 相机本地连接、浏览与原文件导出工具。Ko
 ## 许可
 
 见 [LICENSE](LICENSE) 与 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
+## 素材与版权
+
+- 本 App **不内置任何 NP3 方案文件**，也不内置官方封面图与方案说明正文；方案列表、参数与封面在运行时通过尼康云创官方接口获取，或由相机侧自行拉取。
+- 仓库里**不收录**第三方 `.NP3` 样本（他人作品）。`app/src/test/resources/` 下的 NP3 测试夹具改为按 `docs/research/np3-format.md` 现场拼字节，不依赖真实样本。
+- 仓库不存放官方方案详情快照（参数/EXIF/说明正文）。需要复现的研究结论见 `docs/research/`，脚本需自备样本。
+- 本项目与尼康无隶属或授权关系；名称与图标不代表官方。

@@ -1,8 +1,10 @@
 # NP3 生成验证报告：官网参数 → NP3 字节
 
 > 目的：验证「用尼康云创官方参数表重建 NP3 文件」是否可行、缺口在哪。
-> 样本：Timor88/NikonNP3 仓库 32 个真实相机导出的 `.NP3`；参数：官网 144 个方案详情（本仓 `docs/data/recipes/details/`）。
-> 复现：`python3 tools/np3/np3_generate.py`
+> 样本：曾用 Timor88/NikonNP3 的 32 个真实 `.NP3`；参数：官网 144 个方案详情。
+> **2026-11-14 更新**：第三方 `.NP3` 样本与方案详情快照已从仓库移除（避免再分发他人作品，见 README「素材与版权」）。
+> 本文的结论基于当时的本地复现；复现脚本需自备样本，见 `tools/np3/np3_generate.py` 顶部说明。
+> 复现：`python3 tools/np3/np3_generate.py --samples <你的NP3目录>`
 
 ## 1. 结论
 

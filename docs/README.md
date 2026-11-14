@@ -19,8 +19,6 @@
 - [research/np3-format.md](research/np3-format.md)：NP3 二进制结构（`NCP\0` 魔数、头、TLV、BI0 自定义曲线尾）逆向结论。
 - [research/np3-generation-report.md](research/np3-generation-report.md)：云创 API 参数 → NP3 的字段映射标定、十例字节对照与缺口说明。
 - [data/recipes/list.json](data/recipes/list.json)：云创官方书 144 个方案索引（已剔除签名 URL）。
-- [data/recipes/details/](data/recipes/details/)：144 个方案详情快照（参数、EXIF、说明，签名 URL 已剥离 query）。
-- [data/recipes/generated/](data/recipes/generated/)：按 API 参数生成的 10 个 NP3 样本，用于字节对照。
 - [references/ZF_Relay_真机验证记录.md](references/ZF_Relay_真机验证记录.md)：旧项目原始进度记录副本。
 - [references/ZF_Relay_MVP审查与后续开发.md](references/ZF_Relay_MVP审查与后续开发.md)：R1–R4 审查与既有验收标准副本。
 - [references/ZRelay_Android_逆向可行性评估.md](references/ZRelay_Android_逆向可行性评估.md)：Android 样本评估副本。

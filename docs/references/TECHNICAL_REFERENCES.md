@@ -210,10 +210,10 @@
 | 结论 | 等级 | 证据位置 |
 |---|---|---|
 | 云创官方书 144 个方案目录零登录可取，含签名封面 URL 与点赞数 | A/B | `NIKON_CLOUD_RESEARCH.md` §7；`../data/recipes/list.json` |
-| 方案详情零登录可取，含 10 项优化校准参数、EXIF、说明与上下篇 | A/B | `NIKON_CLOUD_RESEARCH.md` §7；`../data/recipes/details/` |
+| 方案详情零登录可取，含 10 项优化校准参数、EXIF、说明与上下篇 | A/B | `NIKON_CLOUD_RESEARCH.md` §7；`../data/recipes/list.json` |
 | 详情接口有 IP 级频控，`E01_0701` 静默约 45s 恢复；稳定 1.5–3s/请求可通过 | A | `NIKON_CLOUD_RESEARCH.md` §7 |
 | 封面签名 URL 有效期约 1 小时，可直连下载，不绑定来源 IP | A | 同上（解 Base64 Policy） |
 | 登录态收藏、建书、本地方案、相机槽位 C001–C005 接口存在 | B | `NIKON_CLOUD_RESEARCH.md` §6 §8（前端 chunk 反解，未真机调用） |
-| NP3 二进制结构（`NCP\0` 头、TLV、BI0 自定义曲线尾）已逆向，32/32 样本字节级 roundtrip | A | `../research/np3-format.md`；`app/src/test/java/com/chrisz/nikconnect/np3/Np3FileTest.kt` |
+| NP3 二进制结构（`NCP\0` 头、TLV、BI0 自定义曲线尾）已逆向，编解码按格式规范自测（第三方样本已移除） | A | `../research/np3-format.md`；`app/src/test/java/com/chrisz/nikconnect/np3/Np3FileTest.kt` |
 | 云创参数 → NP3 tag 映射 32/32 全对；曲线/色相表/BI0 尾不在 API 内 | A | `../research/np3-generation-report.md` |
 | 云创服务端不下发 NP3 字节（无下载端点），方案由相机主动拉取 | B | `NIKON_CLOUD_RESEARCH.md` §8；`../research/np3-generation-report.md` |
