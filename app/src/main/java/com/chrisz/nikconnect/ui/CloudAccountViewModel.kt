@@ -492,9 +492,22 @@ internal class CloudAccountViewModel(
             try {
                 // 删除永远逐条走 C005：C004 的空数组不在契约里（服务端 422），
                 // 而"替换已占用的位置"也必须先删旧的再 PATCH（真机 400 实证）。
-                plan.deletes.forEach { id -> withSession { it.deleteSlot(camera.id, id) } }
-                plan.assignments?.let { assignments ->
-                    withSession { it.replaceSlots(camera.id, assignments) }
+                // 删除永远逐条走 C005：C004 的空数组不在契约里（服务端 422）。
+                // 一旦后续 PATCH 失败，必须把已删的方案加回去 —— 否则用户会看到相机槽位被清空。
+                val deleted = mutableListOf<String>()
+                try {
+                    plan.deletes.forEach { id ->
+                        withSession { it.deleteSlot(camera.id, id) }
+                        deleted += id
+                    }
+                    plan.assignments?.let { assignments ->
+                        withSession { it.replaceSlots(camera.id, assignments) }
+                    }
+                } catch (e: CloudException) {
+                    deleted.forEach { id ->
+                        runCatching { withSession { it.addRecipes(camera.id, listOf(id)) } }
+                    }
+                    throw e
                 }
                 val refreshed = fetchSlots(client, camera.id)
                 _state.update {

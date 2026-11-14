@@ -711,15 +711,17 @@ internal fun planSlotWrite(before: List<CloudSlot>, after: List<CloudSlot>): Clo
     if (beforeKey == afterKey) return CloudSlotWritePlan(noop = true)
     if (afterKey.isEmpty()) return CloudSlotWritePlan(deletes = beforeKey.map { it.second }.distinct())
 
-    // 把一个已占用的位置换成另一个方案，不能只靠 PATCH：PATCH 只是"排布覆盖"，
-    // 服务端仍然认为被换掉的方案属于这台相机，实测直接 400（真机 2026-11-14）。
-    // 必须先 C005 删掉旧方案，再 PATCH 新排布。
-    val replaced = beforeKey
-        .filter { (slotNo, recipeId) -> afterKey.any { it.first == slotNo && it.second != recipeId } }
+    // 只有"在这次编辑里彻底消失的方案"才需要 C005 删除。
+    // 教训（真机 2026-11-14）：早先按"同一槽位换了方案"判断，把一次**互换**误判成两次替换，
+    // 结果先把两个方案都删掉了，再 PATCH 已不存在的 id → 400，相机槽位被清空。
+    val afterIds = afterKey.map { it.second }.toSet()
+    val removed = beforeKey
         .map { it.second }
+        .filterNot { it in afterIds }
+        .distinct()
 
     return CloudSlotWritePlan(
-        deletes = replaced.distinct(),
+        deletes = removed,
         assignments = afterKey.map { (slotNo, recipeId) -> CloudSlotAssignment(slotNo, recipeId) },
     )
 }

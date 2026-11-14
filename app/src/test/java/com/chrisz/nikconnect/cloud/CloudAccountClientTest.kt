@@ -249,6 +249,32 @@ class CloudAccountClientTest {
         assertEquals("IF_IR_R_C004", plan.callId)
     }
 
+    /**
+     * 真机踩过（2026-11-14，破坏性）：一次「互换」被当成两次「替换」，
+     * 于是先把两个方案都 C005 删掉，再 PATCH 已不存在的 id → 400，相机槽位被清空。
+     * 互换只是顺序变化，**不能产生任何删除**。
+     */
+    @Test
+    fun `swapping two slots never plans deletes`() {
+        val plan = planSlotWrite(slotsOf("A", "B"), slotsOf("B", "A"))
+        assertTrue(plan.deletes.isEmpty())
+        assertEquals(
+            listOf(
+                CloudSlotAssignment(slotNo = 1, recipeId = "B"),
+                CloudSlotAssignment(slotNo = 2, recipeId = "A"),
+            ),
+            plan.assignments,
+        )
+    }
+
+    /** 真的把某个方案换掉（旧方案从排布里彻底消失）时才需要删除。 */
+    @Test
+    fun `replacing the recipe of a slot plans one delete plus the new patch`() {
+        val plan = planSlotWrite(slotsOf("A"), slotsOf("X"))
+        assertEquals(listOf("A"), plan.deletes)
+        assertEquals(listOf(CloudSlotAssignment(slotNo = 1, recipeId = "X")), plan.assignments)
+    }
+
     /** 真机踩过：全清空时发 `{"recipes":[]}` 被服务端回 422，Web 端根本不会发这个请求。 */
     @Test
     fun `clearing every slot plans deletes instead of an empty patch`() {

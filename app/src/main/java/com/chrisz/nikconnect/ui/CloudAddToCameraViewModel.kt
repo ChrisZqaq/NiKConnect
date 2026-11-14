@@ -116,7 +116,7 @@ internal class CloudAddToCameraViewModel(
                     api.addRecipes(camera.id, listOf(localId))
                     _state.update { it.copy(working = "正在写入槽位…") }
                     val layout = api.fetchAssignable().layouts[camera.id]
-                    var beforeSlots = mergeSlots(layout, emptyList())
+                    val beforeSlots = mergeSlots(layout, emptyList())
                     val target = position + 1
 
                     // 已经在目标位：C003 可能已把它放进去了，不必再 PATCH。
@@ -124,25 +124,26 @@ internal class CloudAddToCameraViewModel(
                         return@withSession recipeName
                     }
 
-                    // 目标位被别的方案占着：先 C005 删掉它，只 PATCH 会 400（真机实证）。
-                    beforeSlots.firstOrNull { it.index == target }
+                    // 目标位被别的方案占着：那是**真删除**，必须走 C005；PATCH 只表达"仍在的排布"。
+                    val occupant = beforeSlots.firstOrNull { it.index == target }
                         ?.recipeId
                         ?.takeIf { it.isNotBlank() }
-                        ?.let { api.deleteSlot(camera.id, it) }
+                    occupant?.let { api.deleteSlot(camera.id, it) }
 
-                    // 同一方案若已在别的槽位，先移出再重新加回，避免 PATCH 里出现两次同一个 id。
-                    if (beforeSlots.any { it.index != target && it.recipeId == localId }) {
-                        api.deleteSlot(camera.id, localId)
-                        api.addRecipes(camera.id, listOf(localId))
-                        beforeSlots = mergeSlots(api.fetchAssignable().layouts[camera.id], emptyList())
-                    }
-
-                    val assignments = buildAssignments(
-                        layout = beforeSlots.map { if (it.occupied) it.recipeId else null },
+                    // 同一方案若已在别的槽位，这次只是"挪位"，PATCH 的排布里只留目标位即可，
+                    // 不需要先删再加（早先的删+加是多余且危险的）。
+                    val assignmentsAtTarget = buildAssignments(
+                        layout = beforeSlots.map { if (it.recipeId == localId) null else it.recipeId },
                         position = position,
                         localId = localId,
                     )
-                    api.replaceSlots(camera.id, assignments)
+                    try {
+                        api.replaceSlots(camera.id, assignmentsAtTarget)
+                    } catch (e: CloudException) {
+                        // PATCH 失败时把刚删掉的方案加回去，别让相机槽位空着
+                        occupant?.let { runCatching { api.addRecipes(camera.id, listOf(it)) } }
+                        throw e
+                    }
                     recipeName
                 }
             }.onSuccess { name ->
