@@ -349,8 +349,10 @@ private fun GalleryScreen(
         selected.value = emptySet()
     }
     Column(Modifier.fillMaxSize()) {
+        // 两行排布：一行放筛选 + 选择，一行放视图切换。
+        // 挤在一行时「中 / 小」会被 Row 压成 0 宽直接消失（1080px / 3x 密度实测，TextButton 最小 64dp）。
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
+            Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 6.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -363,35 +365,51 @@ private fun GalleryScreen(
                     )
                 }
             }
-            // 视图切换与选择入口在空态也要在：否则筛到 0 张时连「换回大图看看」都做不到。
+            // 选择入口做显式按钮：之前只能长按发现，批量下载等于不存在（UI 审查 2 · P2）。
             if (state.photos.isNotEmpty()) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    // 选择入口做显式按钮：之前只能长按发现，批量下载等于不存在（UI 审查 2 · P2）。
-                    TextButton(
-                        onClick = {
-                            if (selectionMode) exitSelection() else {
-                                selectionMode = true
-                                selected.value = emptySet()
-                            }
-                        },
-                        modifier = Modifier.heightIn(min = 48.dp),
-                    ) { Text(if (selectionMode) "完成" else "选择") }
-                    // 视图改成三段直选：循环按钮要连点两次才知道顺序（UI 审查 2 · P2）。
-                    VIEW_TIERS.forEachIndexed { index, label ->
-                        TextButton(
-                            onClick = { onViewTier(index) },
-                            modifier = Modifier.heightIn(min = 48.dp),
-                        ) {
-                            Text(
-                                label,
-                                color = if (viewTier == index) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                                fontWeight = if (viewTier == index) FontWeight.SemiBold else FontWeight.Normal,
-                            )
+                TextButton(
+                    onClick = {
+                        if (selectionMode) exitSelection() else {
+                            selectionMode = true
+                            selected.value = emptySet()
                         }
+                    },
+                    contentPadding = PaddingValues(horizontal = 10.dp),
+                    modifier = Modifier.heightIn(min = 44.dp),
+                ) { Text(if (selectionMode) "完成" else "选择") }
+            }
+        }
+        if (state.photos.isNotEmpty()) {
+            Row(
+                Modifier.fillMaxWidth().padding(start = 16.dp, end = 20.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "视图",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                // 视图三段直选：循环按钮要连点两次才知道顺序（UI 审查 2 · P2）。
+                VIEW_TIERS.forEachIndexed { index, label ->
+                    val chosen = viewTier == index
+                    Box(
+                        modifier = Modifier
+                            .heightIn(min = 44.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onViewTier(index) }
+                            .padding(horizontal = 12.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = if (chosen) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            fontWeight = if (chosen) FontWeight.SemiBold else FontWeight.Normal,
+                        )
                     }
                 }
             }
