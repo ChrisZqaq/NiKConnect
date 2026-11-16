@@ -731,7 +731,16 @@ private fun PhotoViewer(
     val bitmap = remember(bytes) {
         bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
     }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    // decorFitsSystemWindows = false 必须显式打开：否则 Dialog 窗口自己已经避开系统栏，
+    // 里面的 navigationBarsPadding() 拿到的是 0，底部按钮会被顶到屏幕最下沿并裁掉一半
+    // （真机 bounds 实测：文字只露出 [84,2358][254,2376]，高度剩 18px）。
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
+        ),
+    ) {
         Surface(
             color = MaterialTheme.colorScheme.background,
             modifier = Modifier.fillMaxSize(),
