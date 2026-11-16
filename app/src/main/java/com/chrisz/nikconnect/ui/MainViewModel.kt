@@ -352,6 +352,14 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         downloadQueue.cancel(handle)
     }
 
+    /** 清掉传输页的已完成行：历史与队列两份都要清，否则下一次订阅又会把旧行带回来。 */
+    fun clearCompleted() {
+        finishedDownloads = finishedDownloads.filterNot { it.status == DownloadStatus.COMPLETED }
+        _state.update { state ->
+            state.copy(downloads = state.downloads.filterNot { it.status == DownloadStatus.COMPLETED })
+        }
+    }
+
     private fun QueueTask.toDownloadItem() = DownloadItem(
         photo = photo,
         transferred = transferred,

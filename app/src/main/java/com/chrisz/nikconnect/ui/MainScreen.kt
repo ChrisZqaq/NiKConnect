@@ -6,6 +6,9 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.border
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -51,7 +54,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -69,6 +71,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -113,6 +119,7 @@ internal fun NiKConnectApp(model: MainViewModel) {
         onLoadMore = model::loadMorePhotos,
         onRetryDownload = model::retryDownload,
         onCancelDownload = model::cancelDownload,
+        onClearCompleted = model::clearCompleted,
         onDisconnect = model::disconnect,
         onTab = model::selectTab,
         onViewTier = model::setGalleryViewTier,
@@ -133,6 +140,7 @@ private fun NiKConnectContent(
     onLoadMore: () -> Unit,
     onRetryDownload: (Long) -> Unit,
     onCancelDownload: (Long) -> Unit,
+    onClearCompleted: () -> Unit,
     onDisconnect: () -> Unit,
     onTab: (Int) -> Unit,
     onViewTier: (Int) -> Unit,
@@ -143,10 +151,18 @@ private fun NiKConnectContent(
     val context = LocalContext.current
     val onOpenInAlbum: (DownloadItem) -> Unit = { item -> openInAlbum(context, item.photo.filename) }
     val connected = state.connectionStatus == ConnectionStatus.CONNECTED
+    // 照片页往下滚就把品牌大标题收起来，把首屏让给照片（UI 审查 3 · P1）。
+    var galleryScrolled by remember { mutableStateOf(false) }
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("NIKCONNECT", fontWeight = FontWeight.Black) },
+                title = {
+                    if (state.selectedTab == 0 && connected && galleryScrolled) {
+                        Text("照片", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    } else {
+                        Text("NIKCONNECT", fontWeight = FontWeight.Black)
+                    }
+                },
                 actions = {
                     // 顶栏动作跟着当前 Tab 走：传输页刷新照片没有意义，云创页更不该出现相机断开（UI 审查 2 · P1）。
                     when {
@@ -218,6 +234,7 @@ private fun NiKConnectContent(
                     onCancel = onCancelDownload,
                     onGoPhotos = { onTab(0) },
                     onOpenInAlbum = onOpenInAlbum,
+                    onClearCompleted = onClearCompleted,
                 )
                 connected -> GalleryScreen(
                     state = state,
@@ -227,6 +244,7 @@ private fun NiKConnectContent(
                     onViewTier = onViewTier,
                     onRefresh = onRefresh,
                     thumbnailLoader = thumbnailLoader,
+                    onScrolled = { galleryScrolled = it },
                 )
                 else -> ConnectionScreen(state, onConnect)
             }
@@ -315,6 +333,26 @@ private fun ConnectionStep(number: String, title: String, body: String) {
 
 private val VIEW_TIERS = listOf("大", "中", "小")
 
+/** 工具条上的一小段：文字 + 选中就换主色加粗，不吃 TextButton 的 64dp 最小宽。 */
+@Composable
+private fun ToolbarSegment(label: String, chosen: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .heightIn(min = 40.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 10.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelLarge,
+            color = if (chosen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = if (chosen) FontWeight.SemiBold else FontWeight.Normal,
+        )
+    }
+}
+
 @Composable
 private fun GalleryScreen(
     state: UiState,
@@ -324,6 +362,7 @@ private fun GalleryScreen(
     onViewTier: (Int) -> Unit,
     onRefresh: () -> Unit,
     thumbnailLoader: suspend (Long) -> ByteArray,
+    onScrolled: (Boolean) -> Unit = {},
 ) {
     var selectionMode by rememberSaveable { mutableStateOf(false) }
     var viewerPhoto by remember { mutableStateOf<PhotoObject?>(null) }
@@ -341,6 +380,12 @@ private fun GalleryScreen(
             .filter { it.filename in state.downloadedFilenames }
             .map { it.handle }
     val viewMinSize = listOf(168.dp, 96.dp, 64.dp)[viewTier]
+    val gridState = rememberLazyGridState()
+    LaunchedEffect(gridState) {
+        snapshotFlow { gridState.firstVisibleItemIndex > 0 || gridState.firstVisibleItemScrollOffset > 0 }
+            .distinctUntilChanged()
+            .collect(onScrolled)
+    }
     // 选择集与会话绑定，不随「当前页句柄列表」变化而清空（翻页加载更多不该丢选中）
     val selected = rememberSaveable(
         saver = listSaver(
@@ -353,19 +398,37 @@ private fun GalleryScreen(
         selected.value = emptySet()
     }
     Column(Modifier.fillMaxSize()) {
-        // 两行排布：一行放筛选 + 选择，一行放视图切换。
-        // 挤在一行时「中 / 小」会被 Row 压成 0 宽直接消失（1080px / 3x 密度实测，TextButton 最小 64dp）。
+        // 单行紧凑工具条：筛选 · 视图 · 选择挤进一行，首屏照片能早约 48dp 出现（UI 审查 3 · P1）。
+        // 之前两行是因为 4 个 TextButton 最小 64dp 会把「中/小」压成 0 宽；这里换成小号自绘段，
+        // 并让整行可横向滚动兜底字体放大/窄屏。
         Row(
-            Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 6.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 listOf("全部", "JPEG", "RAW").forEach { tier ->
-                    FilterChip(
-                        selected = filter == tier,
+                    ToolbarSegment(
+                        label = tier,
+                        chosen = filter == tier,
                         onClick = { filter = tier },
-                        label = { Text(tier) },
+                    )
+                }
+                Box(
+                    Modifier
+                        .padding(horizontal = 6.dp)
+                        .size(width = 1.dp, height = 18.dp)
+                        .background(MaterialTheme.colorScheme.outline),
+                )
+                VIEW_TIERS.forEachIndexed { index, label ->
+                    ToolbarSegment(
+                        label = label,
+                        chosen = viewTier == index,
+                        onClick = { onViewTier(index) },
                     )
                 }
             }
@@ -378,44 +441,9 @@ private fun GalleryScreen(
                             selected.value = emptySet()
                         }
                     },
-                    contentPadding = PaddingValues(horizontal = 10.dp),
-                    modifier = Modifier.heightIn(min = 44.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp),
+                    modifier = Modifier.heightIn(min = 40.dp),
                 ) { Text(if (selectionMode) "完成" else "选择") }
-            }
-        }
-        if (state.photos.isNotEmpty()) {
-            Row(
-                Modifier.fillMaxWidth().padding(start = 16.dp, end = 20.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "视图",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                // 视图三段直选：循环按钮要连点两次才知道顺序（UI 审查 2 · P2）。
-                VIEW_TIERS.forEachIndexed { index, label ->
-                    val chosen = viewTier == index
-                    Box(
-                        modifier = Modifier
-                            .heightIn(min = 44.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { onViewTier(index) }
-                            .padding(horizontal = 12.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            label,
-                            style = MaterialTheme.typography.labelLarge,
-                            color = if (chosen) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                            fontWeight = if (chosen) FontWeight.SemiBold else FontWeight.Normal,
-                        )
-                    }
-                }
             }
         }
         if (state.error != null) ErrorCard(state.error, Modifier.padding(horizontal = 20.dp))
@@ -477,15 +505,16 @@ private fun GalleryScreen(
             }
             else -> Box(Modifier.fillMaxSize()) {
                 LazyVerticalGrid(
+                    state = gridState,
                     columns = GridCells.Adaptive(minSize = viewMinSize),
                     contentPadding = PaddingValues(
-                        start = if (viewTier == 2) 6.dp else 16.dp,
-                        top = 8.dp,
-                        end = if (viewTier == 2) 6.dp else 16.dp,
+                        start = when (viewTier) { 2 -> 4.dp; 1 -> 8.dp; else -> 16.dp },
+                        top = 6.dp,
+                        end = when (viewTier) { 2 -> 4.dp; 1 -> 8.dp; else -> 16.dp },
                         bottom = if (selectionMode) 96.dp else 16.dp,
                     ),
-                    horizontalArrangement = Arrangement.spacedBy(if (viewTier == 2) 4.dp else 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(if (viewTier == 2) 4.dp else 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(if (viewTier == 2) 3.dp else if (viewTier == 1) 8.dp else 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(if (viewTier == 2) 3.dp else if (viewTier == 1) 8.dp else 12.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     items(filteredPhotos, key = { it.handle }) { photo ->
@@ -648,11 +677,24 @@ private fun PhotoCard(
     }
     val badgeSize = if (tier == 2) 16.dp else 20.dp
 
+    // 圆角随密度收敛：小图 4dp、中图 8dp、大图 12dp（UI 审查 3 · P2）。
+    val corner = when (tier) {
+        0 -> 12.dp
+        1 -> 8.dp
+        else -> 4.dp
+    }
+    val accent = MaterialTheme.colorScheme.primary
     Column(
         modifier = Modifier
-            .clip(RoundedCornerShape(if (tier == 2) 4.dp else 12.dp))
-            .background(
-                if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
+            .clip(RoundedCornerShape(corner))
+            .background(if (isSelected) accent.copy(alpha = 0.16f) else MaterialTheme.colorScheme.surface)
+            // 选中框用金色而不是薄荷绿：全局强调色只有金色一套（UI 审查 3 · P2）。
+            .then(
+                when {
+                    isSelected -> Modifier.border(1.5.dp, accent, RoundedCornerShape(corner))
+                    selectionMode -> Modifier.border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(corner))
+                    else -> Modifier
+                },
             )
             .combinedClickable(
                 onClick = {
@@ -866,6 +908,7 @@ private fun TransferScreen(
     onCancel: (Long) -> Unit,
     onGoPhotos: () -> Unit,
     onOpenInAlbum: (DownloadItem) -> Unit,
+    onClearCompleted: () -> Unit,
 ) {
     if (state.downloads.isEmpty()) {
         Column(
@@ -899,15 +942,26 @@ private fun TransferScreen(
             val active = state.downloads.count {
                 it.status == DownloadStatus.WAITING || it.status == DownloadStatus.DOWNLOADING
             }
-            Text(
-                buildList {
-                    if (active > 0) add("进行中 $active")
-                    if (done > 0) add("已完成 $done")
-                    if (failed > 0) add("失败 $failed")
-                }.joinToString(" · ").ifBlank { "本次会话没有任务" },
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    buildList {
+                        if (active > 0) add("进行中 $active")
+                        if (done > 0) add("已完成 $done")
+                        if (failed > 0) add("失败 $failed")
+                    }.joinToString(" · ").ifBlank { "本次会话没有任务" },
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                // 任务多了要能自己收摊，否则只剩滚动（UI 审查 3 · P3）。
+                if (done > 0) {
+                    TextButton(
+                        onClick = onClearCompleted,
+                        modifier = Modifier.heightIn(min = 40.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                    ) { Text("清除已完成") }
+                }
+            }
         }
         items(state.downloads, key = { it.photo.handle }) { item ->
             DownloadRow(item = item, onRetry = onRetry, onCancel = onCancel, onOpenInAlbum = onOpenInAlbum)
@@ -922,6 +976,43 @@ private fun DownloadRow(
     onCancel: (Long) -> Unit,
     onOpenInAlbum: (DownloadItem) -> Unit,
 ) {
+    // 完成态折成一行：满进度条 + 容量在重复表达「已经完成」，两行就占掉半屏（UI 审查 3 · P3）。
+    if (item.status == DownloadStatus.COMPLETED) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .padding(start = 14.dp, end = 4.dp)
+                .heightIn(min = 48.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Default.CheckCircle,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    item.photo.filename,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    "已保存到相册 · ${formatBytes(item.photo.size)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            TextButton(onClick = { onOpenInAlbum(item) }, modifier = Modifier.heightIn(min = 44.dp)) {
+                Text("查看")
+            }
+        }
+        return
+    }
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -1159,6 +1250,7 @@ private fun GalleryPreview() {
             onLoadMore = {},
             onRetryDownload = {},
             onCancelDownload = {},
+            onClearCompleted = {},
             onDisconnect = {},
             onTab = {},
             onViewTier = {},

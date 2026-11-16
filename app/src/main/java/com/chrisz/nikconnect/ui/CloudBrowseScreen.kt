@@ -35,6 +35,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
@@ -52,6 +53,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -339,6 +342,18 @@ private fun CloudBrowseContent(
                     .padding(horizontal = 20.dp, vertical = 6.dp),
             )
         }
+        // 相机 Wi-Fi 没有互联网时，封面只能是缓存或空块——先说清楚，别让人以为加载坏了（UI 审查 3 · P1）。
+        val online = rememberOnline()
+        if (!online) {
+            Text(
+                text = "当前连的是相机 Wi-Fi：云端封面与详情需要手机网络，已缓存的封面仍会显示。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 6.dp),
+            )
+        }
 
         PullToRefreshBox(
             isRefreshing = state.refreshing,
@@ -367,6 +382,47 @@ private fun CloudBrowseContent(
             }
         }
     }
+}
+
+/**
+ * 是否有「能上网」的默认网络。
+ *
+ * 相机热点是 isolate 网络（没有 INTERNET 能力），此时系统默认网络会切到蜂窝——
+ * 那反而是有网的；只有连热点且没有蜂窝时才会返回 false。
+ */
+@Composable
+private fun rememberOnline(): Boolean {
+    val context = LocalContext.current
+    var online by remember { mutableStateOf(true) }
+    DisposableEffect(Unit) {
+        val manager = context.getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
+            as? android.net.ConnectivityManager
+        fun read(): Boolean = runCatching {
+            val active = manager?.activeNetwork ?: return@runCatching true
+            manager.getNetworkCapabilities(active)
+                ?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) ?: true
+        }.getOrDefault(true)
+        online = read()
+        val callback = object : android.net.ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: android.net.Network) {
+                online = read()
+            }
+
+            override fun onLost(network: android.net.Network) {
+                online = read()
+            }
+
+            override fun onCapabilitiesChanged(
+                network: android.net.Network,
+                capabilities: android.net.NetworkCapabilities,
+            ) {
+                online = read()
+            }
+        }
+        runCatching { manager?.registerDefaultNetworkCallback(callback) }
+        onDispose { runCatching { manager?.unregisterNetworkCallback(callback) } }
+    }
+    return online
 }
 
 /** 排序项：选中=主色 + 加粗，未选中=次要灰；只有文字，没有背景形状。 */
@@ -427,19 +483,10 @@ private fun CloudRecipeCard(recipe: CloudRecipe, onClick: () -> Unit) {
                 modifier = Modifier.weight(1f),
             )
         }
-        val showsCode = recipe.pictureControlName.isNotBlank() &&
-            !recipe.pictureControlName.equals(recipe.name, ignoreCase = true)
-        // 主名与英文代号相同时只留一行：重复文本等于白占一行（UI 审查 2 · P2）。
-        if (showsCode || recipe.likes > 0) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
-            if (showsCode) Text(
-                recipe.pictureControlName,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            if (recipe.likes > 0) {
+        // 卡片只留「主名 + 一个元信息」（点赞数）：英文代号属于详情页的信息，
+        // 三行文字在双列网格里互相抢注意力（UI 审查 3 · P2）。
+        if (recipe.likes > 0) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
                 Icon(
                     Icons.Default.FavoriteBorder,
                     contentDescription = null,
@@ -486,7 +533,16 @@ private fun CoverPlaceholder() {
                     end = Offset(shift * 900f, 600f),
                 ),
             ),
-    )
+        contentAlignment = Alignment.Center,
+    ) {
+        // 纯渐变仍可能被当成空块，中间放一个淡淡的图片图标把它读成「占位」（UI 审查 3 · P1）。
+        Icon(
+            imageVector = Icons.Default.PhotoLibrary,
+            contentDescription = null,
+            modifier = Modifier.size(22.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+        )
+    }
 }
 
 @Composable
