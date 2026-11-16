@@ -744,7 +744,9 @@ private fun PhotoViewer(
     // 结构上就不可能被挤出去。
     val systemBottom = WindowInsets.systemBars.asPaddingValues().calculateBottomPadding()
     val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-    val bottomGap = maxOf(systemBottom, 36.dp)
+    // + 36dp 是硬保底：这台机器 navigationBars 的 InsetsSource frame 高度就是 0，
+    // 任何「取 inset 与 X 的较大者」在 inset 为 NaN/0 时都可能落空，所以改成加法。
+    val bottomGap = maxOf(systemBottom, 0.dp) + 36.dp
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(
@@ -779,7 +781,8 @@ private fun PhotoViewer(
                 Box(
                     Modifier
                         .fillMaxSize()
-                        .padding(top = topInset + 76.dp, bottom = bottomGap + 80.dp),
+                        // 底部让出「操作条 60dp + 安全区」再加一点呼吸，图片才不会被按钮压住。
+                        .padding(top = topInset + 76.dp, bottom = bottomGap + 68.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     if (bitmap != null) {
@@ -793,11 +796,19 @@ private fun PhotoViewer(
                         CircularProgressIndicator()
                     }
                 }
-                Row(
+                // 用「真实占位的 Spacer」而不是 padding/inset 来表达底部安全区：
+                // 实测这台机器 navigationBars 的 InsetsSource frame 高度是 0、Dialog 内 maxOf(inset, 36.dp)
+                // 也没能挡住按钮（按钮底边仍落在屏幕最后一行像素上），而 Spacer 的高度是布局出来的，不会被吞掉。
+                Column(
                     Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                        .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = bottomGap),
+                        .navigationBarsPadding(),
+                ) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 16.dp, top = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -819,6 +830,8 @@ private fun PhotoViewer(
                             },
                         )
                     }
+                }
+                    Spacer(Modifier.height(bottomGap))
                 }
             }
         }
