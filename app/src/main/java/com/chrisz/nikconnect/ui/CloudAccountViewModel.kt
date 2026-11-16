@@ -36,6 +36,12 @@ internal data class CloudAccountState(
     val slots: List<CloudSlot> = emptyList(),
     val loadingSlots: Boolean = false,
     val slotsError: String? = null,
+    /**
+     * 排布是否已知。`IF_FR100_H13` 读失败时为 false —— 此时 C002 的 `localRecipes` 只有已占用项、
+     * 不带槽位号，按数组顺序编号会把空洞抹平（真实 [空,A,空,B] 会显示成 [A,B,空,空]），
+     * 据此保存就是把错误位置写回相机。未知状态下只读展示错误、禁止编辑与保存。
+     */
+    val layoutKnown: Boolean = true,
     val assignableCount: Int? = null,
     /** 账号里的收藏夹与方案副本（`IF_FR100_H05`）。 */
     val library: CloudMyRecipes? = null,
@@ -519,6 +525,10 @@ internal class CloudAccountViewModel(
         val camera = _state.value.selected ?: return
         val draft = _state.value.draft ?: return
         if (_state.value.saving) return
+        if (!_state.value.layoutKnown) {
+            _state.update { it.copy(saveError = "还没读到相机当前的排布，不能保存。先点重试。") }
+            return
+        }
         val guid = workingGuid ?: _state.value.guid ?: return
 
         val before = padSlots(_state.value.slots)
@@ -549,10 +559,29 @@ internal class CloudAccountViewModel(
                         withSession { it.replaceSlots(camera.id, assignments) }
                     }
                 } catch (e: CloudException) {
-                    deleted.forEach { id ->
-                        runCatching { withSession { it.addRecipes(camera.id, listOf(id)) } }
+                    // 光把方案加回「可分配池」不等于恢复槽位：池是账号级、位置在 PATCH 里。
+                    // 所以按写前的完整排布重建一次，并读回核对；恢复不了就如实告诉用户。
+                    val restoreNote = restoreLayout(client, camera.id, before)
+                    _state.update {
+                        it.copy(
+                            saving = false,
+                            saveError = buildString {
+                                append(describe(e, callId))
+                                append("\n已删除 ${deleted.size} 个方案；")
+                                append(restoreNote ?: "已按原排布恢复。")
+                            },
+                            rawSnippet = "请求体：${
+                                runCatching {
+                                    CloudAccountClient(accessToken = accessToken, guid = guid)
+                                        .buildSlotBody(plan.assignments ?: emptyList())
+                                }.getOrDefault("?")
+                            }\n${e.message}",
+                        )
                     }
-                    throw e
+                    fetchSlots(client, camera.id).let { refreshed ->
+                        if (requestId == slotRequestId) _state.update { it.copy(slots = refreshed, draft = null) }
+                    }
+                    return@launch
                 }
                 val refreshed = fetchSlots(client, camera.id)
                 if (requestId != slotRequestId || _state.value.selected?.id != camera.id) return@launch
@@ -584,6 +613,44 @@ internal class CloudAccountViewModel(
         }
     }
 
+    /**
+     * 用写前的完整排布把相机槽位恢复回去，并读回核对。
+     *
+     * @return null 表示已恢复；否则返回给人看的一句说明（部分完成/需要人工核对）
+     */
+    private suspend fun restoreLayout(
+        client: CloudAccountApi,
+        cameraId: String,
+        before: List<CloudSlot>,
+    ): String? {
+        val want = padSlots(before)
+            .mapNotNull { slot ->
+                val id = slot.recipeId?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                CloudSlotAssignment(slot.index, id)
+            }
+        if (want.isEmpty()) return "原本就没有占用槽位，无需恢复。"
+        // 先确认方案还在池里（被 C005 删掉的会同时离开池），不在就 C003 加回，再整体 PATCH 回原位置。
+        val live = runCatching { client.fetchAssignable() }.getOrNull()?.layouts?.get(cameraId)
+        val missing = want.map { it.recipeId }.filterNot { it in live.orEmpty().filterNotNull() }.distinct()
+        missing.forEach { id -> runCatching { client.addRecipes(cameraId, listOf(id)) } }
+        val patched = runCatching { client.replaceSlots(cameraId, want) }.isSuccess
+        val after = runCatching {
+            val layout = runCatching { client.fetchAssignable() }.getOrNull()?.layouts?.get(cameraId)
+            client.cameraSlots(cameraId, layout)
+        }.getOrNull()
+        val restored = patched && after != null && want.all { assignment ->
+            after.firstOrNull { it.index == assignment.slotNo }?.recipeId == assignment.recipeId
+        }
+        return if (restored) {
+            null
+        } else {
+            "原排布没能完全恢复，请到账号页逐格核对（当前：${
+                after?.filter { it.recipeId != null }?.joinToString("；") { "${it.index}:${it.name.ifBlank { it.recipeId.orEmpty() }}" }
+                    ?: "读取失败"
+            }）"
+        }
+    }
+
     fun consumeNotice() {
         _state.update { it.copy(savedNotice = null) }
     }
@@ -600,16 +667,27 @@ internal class CloudAccountViewModel(
         cameraId: String,
     ): List<CloudSlot> {
         val assignable = runCatching { client.fetchAssignable() }.getOrNull()
-        if (assignable != null) {
+        if (assignable == null) {
+            // 读不到真实排布就别假装知道：给空列表 + 明确报错，编辑入口由 layoutKnown 关掉。
             _state.update {
                 it.copy(
-                    assignable = assignable.recipes,
-                    assignableCount = assignable.recipes.size,
-                    assignableError = null,
+                    layoutKnown = false,
+                    slots = emptyList(),
+                    slotsError = "没读到相机当前的槽位排布（IF_FR100_H13 失败）。" +
+                        "这不代表相机没有槽位——先点重试或重新登录，再回来编辑，避免把错误位置写回相机。",
                 )
             }
+            return emptyList()
         }
-        return withSession { it.cameraSlots(cameraId, assignable?.layouts?.get(cameraId)) }
+        _state.update {
+            it.copy(
+                assignable = assignable.recipes,
+                assignableCount = assignable.recipes.size,
+                assignableError = null,
+                layoutKnown = true,
+            )
+        }
+        return withSession { it.cameraSlots(cameraId, assignable.layouts[cameraId]) }
     }
 
     fun backToList() {

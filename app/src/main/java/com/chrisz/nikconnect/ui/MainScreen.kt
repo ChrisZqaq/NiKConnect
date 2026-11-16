@@ -447,11 +447,32 @@ private fun GalleryScreen(
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
+                // 分页下"没读到"≠"相机里没有"：前 60 个对象可能全是另一种格式，
+                // 所以 hasMore 时要说成"已加载的照片里没有"，并保留继续读取的入口（评审 P2-7）。
                 Text(
-                    if (filter == "RAW") "这台相机没有 RAW 照片" else "没有 JPEG 照片",
+                    text = when {
+                        state.hasMore && filter == "RAW" -> "已加载的照片里没有 RAW"
+                        state.hasMore -> "已加载的照片里没有 JPEG"
+                        filter == "RAW" -> "这台相机没有 RAW 照片"
+                        else -> "没有 JPEG 照片"
+                    },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(12.dp))
+                if (state.hasMore) {
+                    Button(
+                        onClick = onLoadMore,
+                        enabled = !state.loadingMore,
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    ) {
+                        if (state.loadingMore) {
+                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        } else {
+                            Text("继续加载（${state.photos.size}/${state.totalPhotoCount}）")
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                }
                 TextButton(onClick = { filter = "全部" }) { Text("查看全部照片") }
             }
             else -> Box(Modifier.fillMaxSize()) {

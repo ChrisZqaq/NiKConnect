@@ -101,7 +101,7 @@ internal fun CloudAccountScreen(
     var pendingDelete by remember { mutableStateOf<CloudSlot?>(null) }
 
     // 同一个 guid 重新登录后 token 会变：把新凭据交给已有 ViewModel，旧请求随代次变化失效。
-    LaunchedEffect(token, guid) { model.updateCredentials(token, guid) }
+    LaunchedEffect(token, guid, refreshToken) { model.updateCredentials(token, guid, refreshToken) }
 
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -575,7 +575,7 @@ private fun SlotSection(
             } else {
                 TextButton(
                     onClick = onEdit,
-                    enabled = state.slots.isNotEmpty(),
+                    enabled = state.slots.isNotEmpty() && state.layoutKnown,
                     modifier = Modifier.heightIn(min = 48.dp),
                 ) { Text("编辑排布") }
             }

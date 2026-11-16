@@ -73,12 +73,15 @@ internal fun CloudFavoriteBar(
             )
         }
     }
-    val model: CloudFavoriteViewModel = viewModel(key = "cloud-favorite-$guid", factory = factory)
+    // key 必须带 recipeId：只有 guid 时各方案共用同一个 ViewModel，
+    // 从已收藏的 A 切到 B 会短暂沿用 A 的「已收藏」与本地 ID，确认取消就删错了方案。
+    val model: CloudFavoriteViewModel =
+        viewModel(key = "cloud-favorite-$guid-$recipeId", factory = factory)
     val state by model.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var confirmRemove by remember { mutableStateOf(false) }
 
-    LaunchedEffect(token, guid) { model.updateCredentials(token, guid) }
+    LaunchedEffect(token, guid, refreshToken) { model.updateCredentials(token, guid, refreshToken) }
     LaunchedEffect(recipeName) { model.loadCollection(recipeName) }
     LaunchedEffect(state.notice) {
         state.notice?.let {

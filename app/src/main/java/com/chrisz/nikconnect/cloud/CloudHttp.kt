@@ -242,8 +242,22 @@ internal class CloudHttp(
      */
     suspend fun refreshAccessToken(refreshToken: String): Pair<String, String?>? {
         if (refreshToken.isBlank()) return null
-        return refreshGate.withLock { refreshLocked(refreshToken) }
+        return refreshGate.withLock {
+            // 串行还不够：Keycloak 续期会轮换 refresh_token，第二个请求拿着同一个旧 token 再提交一次
+            // 只会失败并把用户的会话搞挂。同一个旧 token 已经有结果就直接复用（评审 P2-6）。
+            if (refreshToken == lastRefreshToken) return@withLock lastRefreshResult
+            val result = refreshLocked(refreshToken)
+            if (result != null) {
+                lastRefreshToken = refreshToken
+                lastRefreshResult = result
+            }
+            result
+        }
     }
+
+    /** 最近一次成功续期的「旧 refresh → 新 token 对」，用于同一旧 token 的重复请求复用。 */
+    private var lastRefreshToken: String? = null
+    private var lastRefreshResult: Pair<String, String?>? = null
 
     private suspend fun refreshLocked(refreshToken: String): Pair<String, String?>? {
         val form = buildString {

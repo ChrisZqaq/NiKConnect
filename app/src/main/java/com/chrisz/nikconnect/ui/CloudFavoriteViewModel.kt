@@ -64,10 +64,11 @@ internal class CloudFavoriteViewModel(
     private val _state = MutableStateFlow(CloudFavoriteState())
     val state: StateFlow<CloudFavoriteState> = _state.asStateFlow()
 
-    fun updateCredentials(token: String?, guid: String?) {
+    fun updateCredentials(token: String?, guid: String?, refreshToken: String? = null) {
         val nextToken = token?.trim().orEmpty()
         val nextGuid = guid.orEmpty()
         if (nextToken.isEmpty()) return
+        refreshToken?.takeIf { it.isNotBlank() }?.let { currentRefresh = it }
         if (nextToken == accessToken && nextGuid == accountGuid) return
         accessToken = nextToken
         accountGuid = nextGuid
@@ -79,8 +80,12 @@ internal class CloudFavoriteViewModel(
     /** 打开详情页时查一次「这个方案在不在我的收藏里」。 */
     fun loadCollection(recipeName: String) {
         if (recipeName.isBlank() || accountGuid.isBlank()) return
+        // 换方案就先把上一方案的结论清掉：否则按钮会短暂显示上一份的「已收藏 · 点击取消」。
+        if (knownName.isNotBlank() && knownName != recipeName) {
+            _state.value = CloudFavoriteState(loading = true)
+        }
         knownName = recipeName
-        if (_state.value.loading) return
+        if (_state.value.loading && _state.value.collected != null) return
         _state.update { it.copy(loading = true, error = null, detail = null) }
         viewModelScope.launch {
             try {

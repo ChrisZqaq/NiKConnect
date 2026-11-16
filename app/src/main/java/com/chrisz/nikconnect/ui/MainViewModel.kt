@@ -88,6 +88,17 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     private var downloader: PhotoDownloader? = null
 
     private val _queueTasks = MutableStateFlow<List<QueueTask>>(emptyList())
+
+    /**
+     * 已完成导入记录。与「当前连接的任务队列」分开持有：队列描述会话内进度，会随断开/重连清空，
+     * 而这份记录描述本机相册里已经有的文件，只有用户自己处理才会变。
+     */
+    private var finishedDownloads: List<DownloadItem> = emptyList()
+
+    /** 队列即将被清空时，把当时已完成的行冻结进历史，避免顺带消失。 */
+    private fun freezeCompleted() {
+        finishedDownloads = _state.value.downloads.filter { it.status == DownloadStatus.COMPLETED }
+    }
     val queueTasks: StateFlow<List<QueueTask>> = _queueTasks.asStateFlow()
 
     @Volatile
@@ -115,7 +126,11 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         PhotoDownloader.cleanupStalePartials(application)
         viewModelScope.launch {
             _queueTasks.collect { tasks ->
-                _state.update { state -> state.copy(downloads = tasks.map { it.toDownloadItem() }) }
+                val active = tasks.map { it.toDownloadItem() }
+                val activeHandles = active.map { it.photo.handle }.toSet()
+                // 已完成的历史单独持有：队列被清空（断开/重连）时不能连带抹掉「我刚下载过什么」。
+                val kept = finishedDownloads.filterNot { it.photo.handle in activeHandles }
+                _state.update { state -> state.copy(downloads = kept + active) }
             }
         }
         observeQueue(downloadQueue)
@@ -131,6 +146,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     }
 
     private fun replaceDownloadQueue() {
+        freezeCompleted()
         downloadQueue.cancelAll()
         downloadQueue = createDownloadQueue()
         _queueTasks.value = emptyList()
@@ -200,6 +216,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
                                 if (sessions.isCurrent(generation)) {
                                     invalidateSession()
                                     downloadQueue.cancelAll()
+                                    freezeCompleted()
                                     _queueTasks.value = emptyList()
                                     ConnectionKeeperService.stop(getApplication())
                                     _state.update {
@@ -390,6 +407,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     fun disconnect() {
         invalidateSession()
         downloadQueue.cancelAll()
+        freezeCompleted()
         _queueTasks.value = emptyList()
         repository.close()
         ConnectionKeeperService.stop(getApplication())
