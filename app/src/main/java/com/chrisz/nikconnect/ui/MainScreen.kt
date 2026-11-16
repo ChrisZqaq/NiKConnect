@@ -215,7 +215,15 @@ private fun NiKConnectContent(
                     onGoPhotos = { onTab(0) },
                     onOpenInAlbum = onOpenInAlbum,
                 )
-                connected -> GalleryScreen(state, onDownload, onDownloadAll, onLoadMore, onViewTier, thumbnailLoader)
+                connected -> GalleryScreen(
+                    state = state,
+                    onDownload = onDownload,
+                    onDownloadAll = onDownloadAll,
+                    onLoadMore = onLoadMore,
+                    onViewTier = onViewTier,
+                    onRefresh = onRefresh,
+                    thumbnailLoader = thumbnailLoader,
+                )
                 else -> ConnectionScreen(state, onConnect)
             }
         }
@@ -310,6 +318,7 @@ private fun GalleryScreen(
     onDownloadAll: (List<PhotoObject>) -> Unit,
     onLoadMore: () -> Unit,
     onViewTier: (Int) -> Unit,
+    onRefresh: () -> Unit,
     thumbnailLoader: suspend (Long) -> ByteArray,
 ) {
     var selectionMode by rememberSaveable { mutableStateOf(false) }
@@ -354,7 +363,8 @@ private fun GalleryScreen(
                     )
                 }
             }
-            if (filteredPhotos.isNotEmpty()) {
+            // 视图切换与选择入口在空态也要在：否则筛到 0 张时连「换回大图看看」都做不到。
+            if (state.photos.isNotEmpty()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     // 选择入口做显式按钮：之前只能长按发现，批量下载等于不存在（UI 审查 2 · P2）。
                     TextButton(
@@ -395,8 +405,20 @@ private fun GalleryScreen(
                     Text("读取中…")
                 }
             }
-            state.photos.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("暂无照片", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            state.photos.isEmpty() -> Column(
+                modifier = Modifier.fillMaxSize().padding(32.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text("没读到照片", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "如果相机里确实有照片，重新读取一次；仍为空请确认相机处于回放/传输状态。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(12.dp))
+                Button(onClick = onRefresh, modifier = Modifier.heightIn(min = 48.dp)) { Text("重新读取") }
             }
             filteredPhotos.isEmpty() -> Column(
                 modifier = Modifier.fillMaxSize().padding(32.dp),
