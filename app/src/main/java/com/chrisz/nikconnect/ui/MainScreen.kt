@@ -708,7 +708,15 @@ private fun PhotoViewer(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(photo.filename, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    Column(Modifier.weight(1f)) {
+                        Text(photo.filename, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        // 这里放大的是相机生成的缩略图，不是原图；说清楚比让用户以为画质就这样好（UI 审查 2 · P1）。
+                        Text(
+                            "缩略图预览 · 下载后在相册看原图",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "关闭") }
                 }
                 Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -729,7 +737,8 @@ private fun PhotoViewer(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     TextButton(onClick = onSelect, modifier = Modifier.heightIn(min = 48.dp)) {
-                        Text("选择此照片")
+                        // 与右侧主行动区分：这是「回列表批量下载」的勾选动作，不是另一个下载入口。
+                        Text("勾选这张")
                     }
                     Spacer(Modifier.weight(1f))
                     Button(
