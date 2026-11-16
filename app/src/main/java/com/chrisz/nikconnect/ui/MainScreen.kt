@@ -90,6 +90,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.systemBars
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.chrisz.nikconnect.ptp.DeviceInfo
 import com.chrisz.nikconnect.ptp.PhotoObject
@@ -731,9 +735,16 @@ private fun PhotoViewer(
     val bitmap = remember(bytes) {
         bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
     }
-    // decorFitsSystemWindows = false 必须显式打开：否则 Dialog 窗口自己已经避开系统栏，
-    // 里面的 navigationBarsPadding() 拿到的是 0，底部按钮会被顶到屏幕最下沿并裁掉一半
-    // （真机 bounds 实测：文字只露出 [84,2358][254,2376]，高度剩 18px）。
+    // 两个真机教训叠在一起，才有了下面这套「保底间距 + 底部锚定」的写法：
+    //   1) Dialog 里 navigationBarsPadding() 常常拿到 0（窗口自己已经避开系统栏），
+    //      于是底部按钮被顶到屏幕最下沿、可点高度只剩 60px（正常应为 144px）；
+    //   2) 用 Column + weight 分配高度时，任何一点 inset 偏差都会把操作条挤出可视区，
+    //      表现为「文字只剩 18px 高」。
+    // 所以：间距取「系统 inset 与 36dp 的较大者」，操作条用 align(BottomCenter) 锚定，
+    // 结构上就不可能被挤出去。
+    val systemBottom = WindowInsets.systemBars.asPaddingValues().calculateBottomPadding()
+    val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val bottomGap = maxOf(systemBottom, 36.dp)
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(
@@ -745,15 +756,12 @@ private fun PhotoViewer(
             color = MaterialTheme.colorScheme.background,
             modifier = Modifier.fillMaxSize(),
         ) {
-            // 全屏 Dialog 不会自动让开系统栏：不补 inset 时底部按钮会被手势条/三键导航压住（UI 审查 2 · P0）。
-            Column(
-                Modifier
-                    .fillMaxSize()
-                    .statusBarsPadding()
-                    .navigationBarsPadding(),
-            ) {
+            Box(Modifier.fillMaxSize()) {
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 16.dp, top = topInset + 12.dp, bottom = 12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -768,7 +776,12 @@ private fun PhotoViewer(
                     }
                     IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "关闭") }
                 }
-                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .padding(top = topInset + 76.dp, bottom = bottomGap + 80.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
                     if (bitmap != null) {
                         Image(
                             bitmap = bitmap!!,
@@ -781,7 +794,10 @@ private fun PhotoViewer(
                     }
                 }
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = bottomGap),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
