@@ -397,6 +397,10 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         // 断线不该把账号登出、也不该把图库视图档位打回去。
         _state.update {
             UiState(
+                // 已完成的行和图库里「已下载」角标都描述本机相册的事实，跟相机会话无关：
+                // 断开只是关掉通道，不该把「我刚下载过什么」也一起抹掉。
+                downloads = it.downloads.filter { item -> item.status == DownloadStatus.COMPLETED },
+                downloadedFilenames = it.downloadedFilenames,
                 cloudToken = it.cloudToken,
                 cloudGuid = it.cloudGuid,
                 cloudRefreshToken = it.cloudRefreshToken,

@@ -985,34 +985,50 @@ private fun DownloadRow(
  * 不存 Uri 的原因：重装/清数据后 Uri 会失效，而文件名+相册目录是稳定的。
  */
 private fun openInAlbum(context: android.content.Context, filename: String) {
+    val resolver = context.contentResolver
+    val images = android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+
+    // 按名字取最新的一条：同一张照片下过多次时，旧行可能已经被换成新的，取 DATE_ADDED 最新最稳。
     val uri = runCatching {
-        context.contentResolver.query(
-            android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+        resolver.query(
+            images,
             arrayOf(android.provider.MediaStore.MediaColumns._ID),
             "${android.provider.MediaStore.MediaColumns.DISPLAY_NAME}=?",
             arrayOf(filename),
-            null,
+            "${android.provider.MediaStore.MediaColumns.DATE_ADDED} DESC",
         )?.use { cursor ->
             if (cursor.moveToFirst()) {
-                android.content.ContentUris.withAppendedId(
-                    android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    cursor.getLong(0),
-                )
+                android.content.ContentUris.withAppendedId(images, cursor.getLong(0))
             } else {
                 null
             }
         }
     }.getOrNull()
+
     if (uri == null) {
-        android.widget.Toast.makeText(context, "相册里没找到这张照片", android.widget.Toast.LENGTH_SHORT).show()
+        android.widget.Toast.makeText(context, "相册里没找到「$filename」", android.widget.Toast.LENGTH_LONG).show()
         return
     }
-    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
-        setDataAndType(uri, "image/*")
-        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
+    // NEF/NRW 这类 RAW 在多数机器上没有注册「看图」应用，直接 image/x-nikon-nef 会被系统静默吞掉。
+    // 所以按「精确 MIME → image/* → 不带类型打开相册」逐级退让，全失败才提示。
+    val mime = when {
+        filename.endsWith(".nef", ignoreCase = true) -> "image/x-nikon-nef"
+        filename.endsWith(".nrw", ignoreCase = true) -> "image/x-nikon-nrw"
+        else -> "image/jpeg"
     }
-    runCatching { context.startActivity(intent) }
-        .onFailure { android.widget.Toast.makeText(context, "没有可用的相册应用", android.widget.Toast.LENGTH_SHORT).show() }
+    val attempts = listOf(
+        { android.content.Intent(android.content.Intent.ACTION_VIEW).setDataAndType(uri, mime) },
+        { android.content.Intent(android.content.Intent.ACTION_VIEW).setDataAndType(uri, "image/*") },
+        { android.content.Intent(android.content.Intent.ACTION_VIEW).setData(uri) },
+        { android.content.Intent(android.content.Intent.ACTION_VIEW).setDataAndType(images, "image/*") },
+    )
+    for (build in attempts) {
+        val intent = build().addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        val opened = runCatching { context.startActivity(intent) }.isSuccess
+        if (opened) return
+    }
+    android.widget.Toast.makeText(context, "没有能打开这张照片的应用，可在系统相册里查看", android.widget.Toast.LENGTH_LONG).show()
 }
 
 /**
